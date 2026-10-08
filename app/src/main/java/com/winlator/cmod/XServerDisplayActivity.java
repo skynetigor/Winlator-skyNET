@@ -2043,9 +2043,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Frame Generation (LSFG): a Vulkan layer inside the game, adjustable live because the
         // layer reloads conf.toml on change. Only reachable when armed at launch, since the layer
         // cannot be injected into an already-running Vulkan instance.
-        final boolean lsfgArmed = container != null && LsfgManager.isArmed(container);
+        final boolean lsfgArmed = container != null && LsfgManager.isArmed(this, container);
         if (llFrameGenOptions != null) llFrameGenOptions.setVisibility(View.VISIBLE);
-        if (tvFrameGenHint  != null) tvFrameGenHint.setVisibility(lsfgArmed ? View.GONE : View.VISIBLE);
+        if (tvFrameGenHint  != null) {
+            tvFrameGenHint.setVisibility(lsfgArmed ? View.GONE : View.VISIBLE);
+            if (tvFrameGenHint instanceof TextView) ((TextView) tvFrameGenHint).setText(container != null && LsfgManager.getMultiplier(container) >= 2
+                    ? "Import Lossless.dll in Settings > Components > Frame Generation, then relaunch."
+                    : "Choose a frame generation multiplier in the container settings and relaunch.");
+        }
         if (spFrameGenFPS   != null) spFrameGenFPS.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
         if (lblFrameGenFlow != null) lblFrameGenFlow.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
         if (sbFrameGenFlow  != null) sbFrameGenFlow.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
@@ -2067,8 +2072,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             fgSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                    float flow = fgFlow != null ? fgFlow.getValue() : LsfgManager.getFlowScale(container);
-                    LsfgManager.applyRuntimeConfig(container, fgMultipliers[pos], flow);
+                    float flow = fgFlow != null ? fgFlow.getValue() : LsfgManager.getFlowScale(XServerDisplayActivity.this, container);
+                    LsfgManager.applyRuntimeConfig(XServerDisplayActivity.this, container, fgMultipliers[pos], flow);
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
@@ -2077,13 +2082,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 fgFlow.setMinValue(0.25f);
                 fgFlow.setMaxValue(1.0f);
                 fgFlow.setStep(0.05f);
-                fgFlow.setValue(LsfgManager.getFlowScale(container));
+                fgFlow.setValue(LsfgManager.getFlowScale(this, container));
                 fgFlow.setOnValueChangeListener((sb, value, isFinal) -> {
                     // Apply on release only: each change recreates the layer's swapchain.
                     if (!isFinal) return;
                     int pos = fgSpinner.getSelectedItemPosition();
                     int mul = (pos >= 0 && pos < fgMultipliers.length) ? fgMultipliers[pos] : LsfgManager.getMultiplier(container);
-                    LsfgManager.applyRuntimeConfig(container, mul, value);
+                    LsfgManager.applyRuntimeConfig(this, container, mul, value);
                 });
             }
         }

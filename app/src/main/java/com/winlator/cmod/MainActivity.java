@@ -45,6 +45,7 @@ import androidx.preference.PreferenceManager;
 
 import com.google.android.material.navigation.NavigationView;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.winlator.cmod.lsfg.LsfgManager;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.FileManagerFragment;
 import com.winlator.cmod.R;
@@ -181,6 +182,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             winlatorDir.mkdirs();
 
         containerManager = new ContainerManager(this);
+        new Thread(() -> LsfgManager.migrateLegacyDlls(getApplicationContext()), "lsfg-migrate").start();
 
         Intent intent = getIntent();
         editInputControls = intent.getBooleanExtra("edit_input_controls", false);

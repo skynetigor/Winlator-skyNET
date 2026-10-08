@@ -128,8 +128,9 @@ public final class ContainerImporter {
             warnings.add("FEXCore " + fexcoreVersion + " not available here; using bundled " + DefaultVersion.FEXCORE + ".");
         }
 
-        if (data.optString("extraData", "").contains("lsfg") || data.toString().contains("lsfgEnabled"))
-            warnings.add("Frame generation settings were imported; re-import your Lossless.dll to enable it.");
+        if ((data.optString("extraData", "").contains("lsfg") || data.toString().contains("lsfgMultiplier"))
+                && !com.winlator.cmod.lsfg.LsfgManager.hasDll(context))
+            warnings.add("Frame generation settings were imported; import your Lossless.dll in Settings > Components > Frame Generation to enable it.");
 
         // We're already off the main thread, so create synchronously (createContainerAsync would
         // call new Handler() on this looper-less thread and crash).

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Storage
@@ -82,6 +83,7 @@ import com.winlator.cmod.core.PreloaderDialog
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
+import com.winlator.cmod.ui.container.GameContainerFragment
 import com.winlator.cmod.ui.theme.WinZTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -148,7 +150,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
                         onDuplicate = ::duplicateContainer,
                         onRemove = ::removeContainer,
                         onExport = ::exportContainer,
-                        onImport = ::importContainer
+                        onImport = ::importContainer,
+                        onDownload = { openFragment(GameContainerFragment()) }
                     )
                 }
             }
@@ -242,7 +245,11 @@ class ContainersSettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "Invalid container profile: ${e.message}", Toast.LENGTH_LONG).show()
             return
         }
+        importEnvelope(envelope)
+    }
 
+    /** Runs the container import for an already-parsed profile (from a file or from the game list). */
+    internal fun importEnvelope(envelope: ContainerProfile.Envelope) {
         val preloader = PreloaderDialog(this)
         preloader.showOnUiThread(com.winlator.cmod.R.string.loading)
         Thread {
@@ -252,6 +259,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
             val result = ContainerImporter.run(this, manager, contents, envelope) { /* progress: kept in the spinner */ }
             runOnUiThread {
                 preloader.closeOnUiThread()
+                // Leave the game list (if that is where the import started) before reporting.
+                if (supportFragmentManager.backStackEntryCount > 0) supportFragmentManager.popBackStack()
                 refresh()
                 showImportSummary(result)
             }
@@ -297,7 +306,8 @@ private fun ContainersSettingsScreen(
     onDuplicate: (Int) -> Unit,
     onRemove: (Int) -> Unit,
     onExport: (Int) -> Unit,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    onDownload: () -> Unit
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -328,6 +338,14 @@ private fun ContainersSettingsScreen(
                         onClick = {
                             menuExpanded = false
                             onImport()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("For a game") },
+                        leadingIcon = { Icon(Icons.Outlined.Language, null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDownload()
                         }
                     )
                 }

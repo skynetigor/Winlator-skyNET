@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,14 +19,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
@@ -46,19 +46,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.core.ProtonPackageManager
+import com.winlator.cmod.ui.settings.GlobalLsfgCard
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
 private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER)?.title
     ?: "Proton 10.0-5 arm64ec"
 
+private const val frameGenerationCategory = "Frame Generation"
+
 private val componentCategories = listOf(
-    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools"
+    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", frameGenerationCategory
 )
 
 private val latestRecommendedTypes = setOf("DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64")
@@ -116,6 +118,32 @@ private fun componentVersionParts(type: String, name: String): List<Int> {
     return token.split('.').map { it.toIntOrNull() ?: 0 }
 }
 
+private val componentTypeOrder = listOf("Proton", "Wine", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools")
+
+/** Every number in the name, e.g. "Turnip_Gen8_V36" -> [8, 36], so drivers and 11.0-2 style suffixes sort sensibly. */
+private fun nameNumbers(name: String): List<Int> =
+    Regex("\\d+").findAll(name.lowercase().replace("arm64ec", "").replace("x86_64", ""))
+        .mapNotNull { it.value.toIntOrNull() }.toList()
+
+/** Type order first, then newest version first, then A-Z. */
+private val componentComparator = Comparator<OnboardingComponent> { left, right ->
+    val byType = componentTypeOrder.indexOf(left.type).compareTo(componentTypeOrder.indexOf(right.type))
+    if (byType != 0) return@Comparator byType
+    val byVersion = compareVersionParts(
+        componentVersionParts(right.type, right.name),
+        componentVersionParts(left.type, left.name)
+    )
+    if (byVersion != 0) return@Comparator byVersion
+    val byNumbers = compareVersionParts(nameNumbers(right.name), nameNumbers(left.name))
+    if (byNumbers != 0) byNumbers else left.name.compareTo(right.name, ignoreCase = true)
+}
+
+private fun inCategory(category: String, component: OnboardingComponent, recommendedIds: Set<String>): Boolean = when (category) {
+    "Recommended" -> component.id in recommendedIds
+    "Wine & Proton" -> component.type == "Wine" || component.type == "Proton"
+    else -> component.type == category
+}
+
 private fun recommendedComponentIds(all: List<OnboardingComponent>): Set<String> {
     val result = all.filter { it.recommended && it.type !in latestRecommendedTypes }
         .mapTo(linkedSetOf()) { it.id }
@@ -157,13 +185,12 @@ internal fun OnboardingComponentsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     val visible = remember(all, category, recommendedIds, query) {
         val q = query.trim().lowercase()
-        all.filter {
-            when (category) {
-                "Recommended" -> it.id in recommendedIds
-                "Wine & Proton" -> it.type == "Wine" || it.type == "Proton"
-                else -> it.type == category
-            }
-        }.filter { q.isEmpty() || it.name.lowercase().contains(q) }
+        all.filter { inCategory(category, it, recommendedIds) }
+            .filter { q.isEmpty() || it.name.lowercase().contains(q) }
+            .sortedWith(componentComparator)
+    }
+    val categoryCounts = remember(all, recommendedIds) {
+        componentCategories.associateWith { c -> if (c == frameGenerationCategory) null else all.count { inCategory(c, it, recommendedIds) } }
     }
     val hasInstalledRuntime = bundledInstalled.value || all.any {
         it.installed && (it.type == "Wine" || it.type == "Proton") && !it.runtimeIdentifier.isNullOrBlank()
@@ -184,35 +211,12 @@ internal fun OnboardingComponentsScreen(
                         else "Install a Wine or Proton layer before continuing.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(14.dp))
-                    SourceSelector { cb.onBrowseLocal() }
                     if (showLocalInstallProgress) {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(14.dp))
                         InstallProgressCard(installingLabel, installingProgress)
                     }
-                    Spacer(Modifier.height(10.dp))
-                    CategorySelector(category) { category = it }
-                    Spacer(Modifier.height(10.dp))
-                    ComponentSearchField(query) { query = it }
-                    if (category == "AdrenoTools") {
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Install local driver")
-                        }
-                    }
-                    if (showBundled) {
-                        Spacer(Modifier.height(12.dp))
-                        CoreComponentCard(
-                            ready = ready,
-                            progress = progress,
-                            installed = bundledInstalled.value,
-                            inUse = bundledInUse.value,
-                            busy = installing == bundledRuntimeId,
-                            locked = installing != null,
-                            onInstall = cb::onInstallBundledRuntime,
-                            onRemove = cb::onRemoveBundledRuntime
-                        )
-                    }
+                    Spacer(Modifier.height(14.dp))
+                    CategoryList(category, categoryCounts, Modifier.weight(1f).fillMaxWidth()) { category = it }
                     if (!managerMode && !hasInstalledRuntime) {
                         Spacer(Modifier.height(8.dp))
                         Text(
@@ -223,15 +227,40 @@ internal fun OnboardingComponentsScreen(
                         )
                     }
                 }
-                ComponentList(
-                    visible,
-                    all.isEmpty(),
-                    installing,
-                    installingLabel,
-                    installingProgress,
-                    cb,
-                    Modifier.weight(1.2f).fillMaxHeight()
-                )
+                if (category == frameGenerationCategory) {
+                    Column(Modifier.weight(1.2f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+                        GlobalLsfgCard(collapsible = false)
+                    }
+                } else {
+                    // The search field stays above the list, outside it, so it never scrolls away.
+                    Column(Modifier.weight(1.2f).fillMaxHeight()) {
+                        ComponentSearchField(query) { query = it }
+                        Spacer(Modifier.height(8.dp))
+                        ComponentList(
+                            visible,
+                            all.isEmpty(),
+                            installing,
+                            installingLabel,
+                            installingProgress,
+                            cb,
+                            Modifier.weight(1f).fillMaxWidth()
+                        ) {
+                            LocalInstallButton(category, cb, Modifier.fillMaxWidth())
+                            if (showBundled) {
+                                CoreComponentCard(
+                                    ready = ready,
+                                    progress = progress,
+                                    installed = bundledInstalled.value,
+                                    inUse = bundledInUse.value,
+                                    busy = installing == bundledRuntimeId,
+                                    locked = installing != null,
+                                    onInstall = cb::onInstallBundledRuntime,
+                                    onRemove = cb::onRemoveBundledRuntime
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } else {
             LazyColumn(
@@ -246,19 +275,17 @@ internal fun OnboardingComponentsScreen(
                         else "Install as many versions as you want. At least one Wine or Proton is required.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(16.dp))
-                    SourceSelector { cb.onBrowseLocal() }
                     if (showLocalInstallProgress) {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(16.dp))
                         InstallProgressCard(installingLabel, installingProgress)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
                     CategorySelector(category) { category = it }
                     Spacer(Modifier.height(10.dp))
                     ComponentSearchField(query) { query = it }
-                    if (category == "AdrenoTools") {
+                    if (category != frameGenerationCategory) {
                         Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = { cb.onBrowseDriver() }) { Text("Install local driver") }
+                        LocalInstallButton(category, cb, Modifier)
                     }
                     if (showBundled) {
                         Spacer(Modifier.height(10.dp))
@@ -274,7 +301,8 @@ internal fun OnboardingComponentsScreen(
                         )
                     }
                 }
-                if (all.isEmpty()) item { LoadingCard() }
+                if (category == frameGenerationCategory) item { GlobalLsfgCard(collapsible = false) }
+                else if (all.isEmpty()) item { LoadingCard() }
                 else items(visible, key = { it.id }) {
                     ComponentCard(
                         it,
@@ -315,9 +343,11 @@ private fun ComponentList(
     installingLabel: String?,
     installingProgress: Int,
     cb: OnboardingCallbacks,
-    modifier: Modifier
+    modifier: Modifier,
+    header: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (header != null) item { Column(verticalArrangement = Arrangement.spacedBy(8.dp), content = header) }
         if (loading) item { LoadingCard() }
         else if (list.isEmpty()) item {
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
@@ -359,32 +389,41 @@ private fun ComponentSearchField(value: String, onChange: (String) -> Unit) {
     )
 }
 
+/** "Install local ..." for the selected type; none for Frame Generation, which has no packages. */
 @Composable
-private fun SourceSelector(local: () -> Unit) {
-    Surface(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Row(Modifier.height(56.dp)) {
-            SourcePart(Icons.Outlined.Dns, "Winlator servers", true, {}, Modifier.weight(1f))
-            SourcePart(Icons.Outlined.Folder, "Local package", false, local, Modifier.weight(1f))
-        }
+private fun LocalInstallButton(category: String, cb: OnboardingCallbacks, modifier: Modifier) {
+    when (category) {
+        frameGenerationCategory -> Unit
+        "AdrenoTools" -> OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = modifier) { Text("Install local driver") }
+        else -> OutlinedButton(onClick = { cb.onBrowseLocal() }, modifier = modifier) { Text("Install local component") }
     }
 }
 
+/** Vertical category picker for the landscape layout: one row per component type, with its count. */
 @Composable
-private fun SourcePart(icon: ImageVector, label: String, selected: Boolean, click: () -> Unit, modifier: Modifier) {
-    Surface(
-        onClick = click,
-        modifier = modifier.fillMaxHeight(),
-        color = if (selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent
-    ) {
-        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null)
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+private fun CategoryList(selected: String, counts: Map<String, Int?>, modifier: Modifier, select: (String) -> Unit) {
+    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 8.dp)) {
+        items(componentCategories, key = { it }) { category ->
+            val isSelected = category == selected
+            Surface(
+                onClick = { select(category) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        category,
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                    counts[category]?.let {
+                        Text(it.toString(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
         }
     }
 }
