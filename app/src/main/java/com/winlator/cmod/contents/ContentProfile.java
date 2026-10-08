@@ -53,6 +53,9 @@ public class ContentProfile {
     }
 
     public ContentType type;
+    /** Stable registry id and free-form display name; only set for entries from the remote registry. */
+    public String id;
+    public String name;
     public String verName;
     public int verCode;
     public String desc;
@@ -61,4 +64,8 @@ public class ContentProfile {
     public String wineBinPath;
     public String winePrefixPack;
     public String remoteUrl;
+
+    public String displayName() {
+        return name != null && !name.isEmpty() ? name : verName;
+    }
 }

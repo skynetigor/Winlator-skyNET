@@ -24,7 +24,14 @@ import java.util.Map;
 
 public class ContentsManager {
     public static final String PROFILE_NAME = "profile.json";
-    public static final String REMOTE_PROFILES = "https://raw.githubusercontent.com/StevenMXZ/Winlator-Contents/main/contents.json";
+    public static final String REMOTE_PROFILES = "https://raw.githubusercontent.com/skynetigor/winlator-skynet-components/main/contents.json";
+    private static final String LEGACY_REMOTE_PROFILES = "https://raw.githubusercontent.com/StevenMXZ/Winlator-Contents/main/contents.json";
+
+    /** Drops a saved URL that still points at the old third-party registry so the app falls back to {@link #REMOTE_PROFILES}. */
+    public static void migrateRemoteProfilesUrl(SharedPreferences preferences) {
+        if (LEGACY_REMOTE_PROFILES.equals(preferences.getString("downloadable_contents_url", null)))
+            preferences.edit().remove("downloadable_contents_url").apply();
+    }
     public static final String[] DXVK_TRUST_FILES = {"${system32}/d3d8.dll", "${system32}/d3d9.dll", "${system32}/d3d10.dll", "${system32}/d3d10_1.dll",
             "${system32}/d3d10core.dll", "${system32}/d3d11.dll", "${system32}/dxgi.dll", "${syswow64}/d3d8.dll", "${syswow64}/d3d9.dll", "${syswow64}/d3d10.dll",
             "${syswow64}/d3d10_1.dll", "${syswow64}/d3d10core.dll", "${syswow64}/d3d11.dll", "${syswow64}/dxgi.dll"};
@@ -97,34 +104,6 @@ public class ContentsManager {
         void onProgress(int progress);
     }
 
-    public static final String ASSET_URL_PREFIX = "asset:";
-
-    /** Components shipped inside the APK; they appear in the catalog even when offline. */
-    private static List<ContentProfile> getBundledProfiles() {
-        List<ContentProfile> list = new ArrayList<>();
-        ContentProfile dxvk = new ContentProfile();
-        dxvk.type = ContentProfile.ContentType.CONTENT_TYPE_DXVK;
-        dxvk.verName = "3.1.1-x86_64";
-        dxvk.verCode = 1;
-        dxvk.remoteUrl = ASSET_URL_PREFIX + "contents/dxvk-3.1.1-x86_64.wcp";
-        list.add(dxvk);
-        return list;
-    }
-
-    /** Copies a bundled asset to the given file. Returns false on failure. */
-    public static boolean copyBundledAsset(Context context, String assetUrl, File out) {
-        if (assetUrl == null || !assetUrl.startsWith(ASSET_URL_PREFIX)) return false;
-        try (java.io.InputStream in = context.getAssets().open(assetUrl.substring(ASSET_URL_PREFIX.length()));
-             java.io.FileOutputStream os = new java.io.FileOutputStream(out)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = in.read(buffer)) != -1) os.write(buffer, 0, read);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     public void setRemoteProfiles(String json) {
         try {
             remoteProfiles = new ArrayList<>();
@@ -133,14 +112,15 @@ public class ContentsManager {
                 try {
                     JSONObject object = content.getJSONObject(i);
                     String remoteUrl = object.getString("remoteUrl");
-                    if ("https://github.com/StevenMXZ/Winlator-Contents/releases/download/1.0/Proton.9.0-x86_64.wcp".equals(remoteUrl)
-                            || "https://github.com/StevenMXZ/Winlator-Contents/releases/download/1.0/proton-10-arm64ec.wcp.xz".equals(remoteUrl))
-                        continue;
+                    ContentProfile.ContentType type = ContentProfile.ContentType.getTypeByName(object.getString("type"));
+                    if (type == null) continue;
                     ContentProfile remoteProfile = new ContentProfile();
                     remoteProfile.remoteUrl = remoteUrl;
-                    remoteProfile.type = ContentProfile.ContentType.getTypeByName(object.getString("type"));
+                    remoteProfile.type = type;
                     remoteProfile.verName = object.getString("verName");
                     remoteProfile.verCode = object.getInt("verCode");
+                    remoteProfile.id = object.optString("id", "");
+                    remoteProfile.name = object.optString("name", "");
                     remoteProfiles.add(remoteProfile);
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -172,10 +152,8 @@ public class ContentsManager {
                     }
                 }
             }
-            List<ContentProfile> catalogProfiles = new ArrayList<>(getBundledProfiles());
-            if (remoteProfiles != null) catalogProfiles.addAll(remoteProfiles);
-            {
-                for (ContentProfile remote : catalogProfiles) {
+            if (remoteProfiles != null) {
+                for (ContentProfile remote : remoteProfiles) {
                     if (remote.type == type) {
                         boolean exists = false;
                         for (ContentProfile profile : profiles) {

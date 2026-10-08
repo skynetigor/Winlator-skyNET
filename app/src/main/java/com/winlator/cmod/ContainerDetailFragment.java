@@ -1793,10 +1793,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         dialog.show(R.string.downloading_file);
         CONTENT_IO_EXECUTOR.execute(() -> {
             File output = new File(getContext().getCacheDir(), "content_" + System.currentTimeMillis());
-            boolean fetched = profile.remoteUrl.startsWith(ContentsManager.ASSET_URL_PREFIX)
-                    ? ContentsManager.copyBundledAsset(getContext(), profile.remoteUrl, output)
-                    : Downloader.downloadFile(profile.remoteUrl, output, progress -> requireActivity().runOnUiThread(() -> dialog.setProgress(progress)));
-            if (!fetched) {
+            if (!Downloader.downloadFile(profile.remoteUrl, output, progress -> requireActivity().runOnUiThread(() -> dialog.setProgress(progress)))) {
                 requireActivity().runOnUiThread(() -> {
                     dialog.closeOnUiThread();
                     AppUtils.showToast(getContext(), R.string.unable_to_download_file);

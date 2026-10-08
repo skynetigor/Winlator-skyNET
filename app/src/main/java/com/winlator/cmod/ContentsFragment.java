@@ -270,7 +270,7 @@ public class ContentsFragment extends Fragment {
         if (q.isEmpty()) return profiles;
         List<ContentProfile> result = new ArrayList<>();
         for (ContentProfile p : profiles) {
-            String name = p.verName != null ? p.verName.toLowerCase() : "";
+            String name = p.displayName() != null ? p.displayName().toLowerCase() : "";
             String code = String.valueOf(p.verCode);
             if (name.contains(q) || code.contains(q)) result.add(p);
         }
@@ -328,7 +328,7 @@ public class ContentsFragment extends Fragment {
             };
             holder.ivIcon.setBackground(getContext().getDrawable(iconId));
 
-            holder.tvVersionName.setText(getContext().getString(R.string.version) + ": " + profile.verName);
+            holder.tvVersionName.setText(getContext().getString(R.string.version) + ": " + profile.displayName());
             holder.tvVersionCode.setText(getContext().getString(R.string.version_code) + ": " + profile.verCode);
             holder.ibMenu.setVisibility(profile.remoteUrl == null ? View.VISIBLE : View.GONE);
             holder.ibMenu.setOnClickListener(v -> {

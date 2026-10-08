@@ -15,23 +15,18 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.winlator.cmod.contentdialog.ContentDialog;
-import com.winlator.cmod.contentdialog.DriverDownloadDialog;
-import com.winlator.cmod.contentdialog.DriverRepo;
-import com.winlator.cmod.contentdialog.RepositoryManagerDialog;
 import com.winlator.cmod.contents.AdrenotoolsManager;
 import com.winlator.cmod.contents.Downloader;
+import com.winlator.cmod.contents.RemoteDriverCatalog;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 public class AdrenotoolsFragment extends Fragment {
     private AdrenotoolsManager adrenotoolsManager;
     private RecyclerView recyclerView;
     private RecyclerView updatesRecyclerView;
-    private RepoPreviewAdapter repoPreviewAdapter;
     private UpdateAdapter updateAdapter;
 
     @Override
@@ -53,11 +48,6 @@ public class AdrenotoolsFragment extends Fragment {
         updatesRecyclerView.setLayoutManager(new LinearLayoutManager(updatesRecyclerView.getContext()));
         updateAdapter = new UpdateAdapter(new ArrayList<>());
         updatesRecyclerView.setAdapter(updateAdapter);
-
-        RecyclerView reposRecyclerView = layout.findViewById(R.id.ReposRecyclerView);
-        reposRecyclerView.setLayoutManager(new LinearLayoutManager(reposRecyclerView.getContext()));
-        repoPreviewAdapter = new RepoPreviewAdapter(RepositoryManagerDialog.loadDriverRepos(getContext(), 3));
-        reposRecyclerView.setAdapter(repoPreviewAdapter);
 
         layout.findViewById(R.id.BTCheckUpdates).setOnClickListener(v -> fetchLatestUpdates());
 
@@ -91,46 +81,21 @@ public class AdrenotoolsFragment extends Fragment {
     }
 
     private void fetchLatestUpdates() {
-        if (updateAdapter == null) return;
+        if (updateAdapter == null || getContext() == null) return;
+        final android.content.Context appContext = getContext().getApplicationContext();
 
         Executors.newSingleThreadExecutor().execute(() -> {
+            List<RemoteDriverCatalog.Entry> catalog = RemoteDriverCatalog.load(appContext);
             List<UpdateItem> updates = new ArrayList<>();
-            DriverRepo repo = RepositoryManagerDialog.getStevenMxzRepo();
-            String jsonStr = Downloader.downloadString(repo.apiUrl);
-
-            if (jsonStr == null) {
-                runOnUi(() -> Toast.makeText(getContext(), "Connection failed!", Toast.LENGTH_SHORT).show());
-                return;
-            }
-
-            try {
-                JSONArray releases = new JSONArray(jsonStr);
-                for (int i = 0; i < releases.length() && updates.size() < 5; i++) {
-                    JSONObject release = releases.getJSONObject(i);
-                    JSONArray assets = release.optJSONArray("assets");
-                    if (assets == null) continue;
-
-                    for (int j = 0; j < assets.length(); j++) {
-                        JSONObject asset = assets.getJSONObject(j);
-                        String downloadUrl = asset.optString("browser_download_url", "");
-                        if (downloadUrl.endsWith(".zip") || downloadUrl.endsWith(".tzst")) {
-                            String name = release.optString("name", release.optString("tag_name", asset.optString("name", "Driver Update")));
-                            String repoUrl = release.optString("html_url", "");
-                            updates.add(new UpdateItem(name, repo.name, downloadUrl, repoUrl));
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-                runOnUi(() -> Toast.makeText(getContext(), "Unable to parse driver updates.", Toast.LENGTH_SHORT).show());
-                return;
+            for (RemoteDriverCatalog.Entry entry : catalog) {
+                if (updates.size() >= 5) break;
+                updates.add(new UpdateItem(entry.name, entry.repository, entry.url));
             }
 
             runOnUi(() -> {
                 updateAdapter.setItems(updates);
-                if (updates.isEmpty()) {
-                    Toast.makeText(getContext(), "No driver updates found.", Toast.LENGTH_SHORT).show();
+                if (catalog.isEmpty()) {
+                    Toast.makeText(getContext(), "Connection failed or no drivers in the registry.", Toast.LENGTH_SHORT).show();
                 }
             });
         });
@@ -166,20 +131,6 @@ public class AdrenotoolsFragment extends Fragment {
                 tmpFile.delete();
             });
         });
-    }
-
-    private void openRepositoryManager() {
-        RepositoryManagerDialog dialog = new RepositoryManagerDialog(getContext());
-        dialog.setOnDismissCallback(() -> {
-            RecyclerView.Adapter adapter = recyclerView.getAdapter();
-            if (adapter instanceof DriversAdapter) {
-                ((DriversAdapter)adapter).reloadList();
-            }
-            if (repoPreviewAdapter != null) {
-                repoPreviewAdapter.setRepos(RepositoryManagerDialog.loadDriverRepos(getContext(), 3));
-            }
-        });
-        dialog.show();
     }
 
     private void runOnUi(Runnable action) {
@@ -221,23 +172,6 @@ public class AdrenotoolsFragment extends Fragment {
         @Override public int getItemCount() { return items.size(); }
     }
 
-    private class RepoPreviewAdapter extends RecyclerView.Adapter<DashboardViewHolder> {
-        private List<DriverRepo> repos;
-        RepoPreviewAdapter(List<DriverRepo> repos) { this.repos = repos; }
-        void setRepos(List<DriverRepo> repos) { this.repos = repos; notifyDataSetChanged(); }
-        @Override public DashboardViewHolder onCreateViewHolder(ViewGroup p, int v) { return new DashboardViewHolder(LayoutInflater.from(p.getContext()).inflate(R.layout.adrenotools_dashboard_item, p, false)); }
-        @Override public void onBindViewHolder(DashboardViewHolder h, int position) {
-            DriverRepo repo = repos.get(position);
-            h.name.setText(repo.name);
-            h.version.setText(repo.apiUrl.replace("https://api.github.com/repos/", "/"));
-            h.badge.setVisibility(View.GONE);
-            h.actionButton.setImageResource(android.R.drawable.ic_menu_manage);
-            h.actionButton.setOnClickListener(v -> openRepositoryManager());
-            h.itemView.setOnClickListener(v -> { DriverDownloadDialog d = new DriverDownloadDialog(getContext(), repo.apiUrl); d.setOnDismissCallback(() -> ((DriversAdapter)recyclerView.getAdapter()).reloadList()); d.show(); });
-        }
-        @Override public int getItemCount() { return repos.size(); }
-    }
-
     private static class DashboardViewHolder extends RecyclerView.ViewHolder {
         TextView name, version, badge;
         ImageButton actionButton;
@@ -245,7 +179,7 @@ public class AdrenotoolsFragment extends Fragment {
     }
 
     private static class UpdateItem {
-        String name, repoName, downloadUrl, repoUrl;
-        UpdateItem(String name, String repoName, String downloadUrl, String repoUrl) { this.name = name; this.repoName = repoName; this.downloadUrl = downloadUrl; this.repoUrl = repoUrl; }
+        String name, repoName, downloadUrl;
+        UpdateItem(String name, String repoName, String downloadUrl) { this.name = name; this.repoName = repoName; this.downloadUrl = downloadUrl; }
     }
 }

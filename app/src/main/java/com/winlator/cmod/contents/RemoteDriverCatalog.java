@@ -3,8 +3,7 @@ package com.winlator.cmod.contents;
 import android.content.Context;
 import android.net.Uri;
 
-import com.winlator.cmod.contentdialog.DriverRepo;
-import com.winlator.cmod.contentdialog.RepositoryManagerDialog;
+import androidx.preference.PreferenceManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -14,74 +13,59 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
+/** Adrenotools drivers listed in the remote contents.json as entries of type "RendererDriver". */
 public final class RemoteDriverCatalog {
     private RemoteDriverCatalog() {}
 
+    private static final String TYPE_NAME = "RendererDriver";
+    private static final Pattern GITHUB_REPO = Pattern.compile("^https://github\\.com/([^/]+/[^/]+)/");
+
     public static final class Entry {
+        public final String id;
         public final String repository;
         public final String name;
         public final String url;
 
-        Entry(String repository, String name, String url) {
+        Entry(String id, String repository, String name, String url) {
+            this.id = id;
             this.repository = repository;
             this.name = name;
             this.url = url;
         }
     }
 
+    /** Downloads the registry and returns its drivers in registry order. Blocking; call off the main thread. */
     public static List<Entry> load(Context context) {
         ArrayList<Entry> result = new ArrayList<>();
-        OkHttpClient http = new OkHttpClient();
-        for (DriverRepo repo : RepositoryManagerDialog.loadDriverRepos(context, 0)) {
-            if (repo.apiUrl == null || repo.apiUrl.isEmpty()) continue;
-            try (Response response = http.newCall(new Request.Builder().url(repo.apiUrl).build()).execute()) {
-                if (!response.isSuccessful() || response.body() == null) continue;
-                JSONArray releases = new JSONArray(response.body().string());
-                int accepted = 0;
-                for (int i = 0; i < releases.length() && accepted < 40; i++) {
-                    JSONObject release = releases.optJSONObject(i);
-                    if (release == null) continue;
-                    JSONArray assets = release.optJSONArray("assets");
-                    if (assets == null) continue;
-
-                    String releaseName = release.optString("name", release.optString("tag_name", "")).trim();
-                    ArrayList<JSONObject> zipAssets = new ArrayList<>();
-                    for (int j = 0; j < assets.length(); j++) {
-                        JSONObject asset = assets.optJSONObject(j);
-                        if (asset == null) continue;
-                        String url = asset.optString("browser_download_url", "");
-                        String assetName = asset.optString("name", "");
-                        if (!url.isEmpty() && assetName.toLowerCase(Locale.ENGLISH).endsWith(".zip")) {
-                            zipAssets.add(asset);
-                        }
-                    }
-
-                    for (JSONObject asset : zipAssets) {
-                        if (accepted >= 40) break;
-                        String url = asset.optString("browser_download_url", "");
-                        String assetName = asset.optString("name", "");
-                        String assetLabel = assetName.replaceFirst("(?i)\\.zip$", "").trim();
-
-                        String name;
-                        if (zipAssets.size() > 1) {
-                            name = assetLabel.isEmpty() ? releaseName : assetLabel;
-                        } else {
-                            name = releaseName.isEmpty() ? assetLabel : releaseName;
-                        }
-                        if (name.isEmpty()) continue;
-
-                        result.add(new Entry(repo.name, name, url));
-                        accepted++;
-                    }
+        String registryUrl = PreferenceManager.getDefaultSharedPreferences(context)
+                .getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES);
+        try (Response response = new OkHttpClient().newCall(new Request.Builder().url(registryUrl).build()).execute()) {
+            if (!response.isSuccessful() || response.body() == null) return result;
+            JSONArray entries = new JSONArray(response.body().string());
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject object = entries.optJSONObject(i);
+                if (object == null || !TYPE_NAME.equalsIgnoreCase(object.optString("type"))) continue;
+                String url = object.optString("remoteUrl", "");
+                if (url.isEmpty()) continue;
+                String verName = object.optString("verName", "");
+                String name = object.optString("name", "").trim();
+                if (name.isEmpty()) name = verName;
+                if (name.isEmpty()) continue;
+                String source = object.optString("source", "");
+                if (source.isEmpty()) {
+                    Matcher m = GITHUB_REPO.matcher(url);
+                    source = m.find() ? m.group(1) : "";
                 }
-            } catch (Exception ignored) {
+                result.add(new Entry(object.optString("id", url), source, name, url));
             }
+        } catch (Exception ignored) {
         }
         return result;
     }

@@ -45,6 +45,7 @@ import androidx.preference.PreferenceManager;
 
 import com.google.android.material.navigation.NavigationView;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.FileManagerFragment;
 import com.winlator.cmod.R;
 import com.winlator.cmod.contentdialog.ContentDialog;
@@ -101,6 +102,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
+        ContentsManager.migrateRemoteProfilesUrl(sharedPreferences);
 
         // Persist the default value on first run so all other components
         // (dialogs, fragments) read the correct value instead of their own default
