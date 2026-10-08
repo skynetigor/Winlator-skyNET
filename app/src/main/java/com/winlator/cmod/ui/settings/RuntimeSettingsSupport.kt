@@ -302,6 +302,9 @@ internal suspend fun installRuntimeComponent(
     val archive = File(context.cacheDir, "winz-${System.nanoTime()}")
     val downloaded = withContext(Dispatchers.IO) {
         try {
+            if (profile.remoteUrl.startsWith(ContentsManager.ASSET_URL_PREFIX)) {
+                return@withContext ContentsManager.copyBundledAsset(context, profile.remoteUrl, archive)
+            }
             OkHttpClient().newCall(Request.Builder().url(profile.remoteUrl).build()).execute().use { response ->
                 if (!response.isSuccessful || response.body == null) {
                     false

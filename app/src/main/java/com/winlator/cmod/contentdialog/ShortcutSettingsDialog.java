@@ -874,7 +874,10 @@ public class ShortcutSettingsDialog extends ContentDialog implements DXVKConfigD
         dialog.showOnUiThread(R.string.downloading_file);
         CONTENT_IO_EXECUTOR.execute(() -> {
             File output = new File(getContext().getCacheDir(), "content_" + System.currentTimeMillis());
-            if (!Downloader.downloadFile(profile.remoteUrl, output)) {
+            boolean fetched = profile.remoteUrl.startsWith(ContentsManager.ASSET_URL_PREFIX)
+                    ? ContentsManager.copyBundledAsset(getContext(), profile.remoteUrl, output)
+                    : Downloader.downloadFile(profile.remoteUrl, output);
+            if (!fetched) {
                 fragment.requireActivity().runOnUiThread(() -> {
                     dialog.closeOnUiThread();
                     AppUtils.showToast(getContext(), R.string.unable_to_download_file);

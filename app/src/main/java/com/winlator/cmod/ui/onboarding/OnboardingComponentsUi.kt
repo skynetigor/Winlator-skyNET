@@ -21,17 +21,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -150,14 +154,16 @@ internal fun OnboardingComponentsScreen(
     var category by rememberSaveable { mutableStateOf("Recommended") }
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
     val recommendedIds = remember(all) { recommendedComponentIds(all) }
-    val visible = remember(all, category, recommendedIds) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val visible = remember(all, category, recommendedIds, query) {
+        val q = query.trim().lowercase()
         all.filter {
             when (category) {
                 "Recommended" -> it.id in recommendedIds
                 "Wine & Proton" -> it.type == "Wine" || it.type == "Proton"
                 else -> it.type == category
             }
-        }
+        }.filter { q.isEmpty() || it.name.lowercase().contains(q) }
     }
     val hasInstalledRuntime = bundledInstalled.value || all.any {
         it.installed && (it.type == "Wine" || it.type == "Proton") && !it.runtimeIdentifier.isNullOrBlank()
@@ -186,6 +192,8 @@ internal fun OnboardingComponentsScreen(
                     }
                     Spacer(Modifier.height(10.dp))
                     CategorySelector(category) { category = it }
+                    Spacer(Modifier.height(10.dp))
+                    ComponentSearchField(query) { query = it }
                     if (category == "AdrenoTools") {
                         Spacer(Modifier.height(10.dp))
                         OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = Modifier.fillMaxWidth()) {
@@ -246,6 +254,8 @@ internal fun OnboardingComponentsScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     CategorySelector(category) { category = it }
+                    Spacer(Modifier.height(10.dp))
+                    ComponentSearchField(query) { query = it }
                     if (category == "AdrenoTools") {
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = { cb.onBrowseDriver() }) { Text("Install local driver") }
@@ -329,6 +339,24 @@ private fun ComponentList(
             )
         }
     }
+}
+
+@Composable
+private fun ComponentSearchField(value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = { Text("Search components") },
+        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+        trailingIcon = {
+            if (value.isNotEmpty()) {
+                IconButton(onClick = { onChange("") }) { Icon(Icons.Outlined.Close, "Clear") }
+            }
+        },
+        shape = RoundedCornerShape(14.dp)
+    )
 }
 
 @Composable

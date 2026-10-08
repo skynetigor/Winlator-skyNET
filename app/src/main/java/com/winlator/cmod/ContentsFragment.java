@@ -7,11 +7,14 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.PopupMenu;
@@ -54,7 +57,7 @@ public class ContentsFragment extends Fragment {
     SharedPreferences sp;
     private ContentProfile.ContentType currentContentType = ContentProfile.ContentType.CONTENT_TYPE_WINE;
     private Spinner sContentType;
-
+    private String searchQuery = "";
     private boolean isDarkMode;
 
     @Override
@@ -121,6 +124,15 @@ public class ContentsFragment extends Fragment {
 
         emptyText = layout.findViewById(R.id.TVEmptyText);
 
+        EditText etSearch = layout.findViewById(R.id.ETSearch);
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                searchQuery = s.toString();
+                if (recyclerView != null) loadContentList();
+            }
+        });
         View btInstallContent = layout.findViewById(R.id.BTInstallContent);
         btInstallContent.setOnClickListener(v -> {
             ContentDialog.confirm(getContext(), getString(R.string.do_you_want_to_install_content) + " " + getString(R.string.pls_make_sure_content_trustworthy) + " "
@@ -242,7 +254,7 @@ public class ContentsFragment extends Fragment {
     }
 
     private void loadContentList() {
-        List<ContentProfile> profiles = manager.getProfiles(currentContentType);
+        List<ContentProfile> profiles = filterProfiles(manager.getProfiles(currentContentType));
         if (profiles.isEmpty()) {
             emptyText.setVisibility(View.VISIBLE);
             recyclerView.setVisibility(View.GONE);
@@ -251,6 +263,18 @@ public class ContentsFragment extends Fragment {
             recyclerView.setVisibility(View.VISIBLE);
             recyclerView.setAdapter(new ContentItemAdapter(profiles));
         }
+    }
+
+    private List<ContentProfile> filterProfiles(List<ContentProfile> profiles) {
+        String q = searchQuery.trim().toLowerCase();
+        if (q.isEmpty()) return profiles;
+        List<ContentProfile> result = new ArrayList<>();
+        for (ContentProfile p : profiles) {
+            String name = p.verName != null ? p.verName.toLowerCase() : "";
+            String code = String.valueOf(p.verCode);
+            if (name.contains(q) || code.contains(q)) result.add(p);
+        }
+        return result;
     }
 
     private class ContentItemAdapter extends RecyclerView.Adapter<ContentItemAdapter.ViewHolder> {

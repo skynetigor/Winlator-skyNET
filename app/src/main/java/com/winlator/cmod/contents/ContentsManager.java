@@ -97,6 +97,34 @@ public class ContentsManager {
         void onProgress(int progress);
     }
 
+    public static final String ASSET_URL_PREFIX = "asset:";
+
+    /** Components shipped inside the APK; they appear in the catalog even when offline. */
+    private static List<ContentProfile> getBundledProfiles() {
+        List<ContentProfile> list = new ArrayList<>();
+        ContentProfile dxvk = new ContentProfile();
+        dxvk.type = ContentProfile.ContentType.CONTENT_TYPE_DXVK;
+        dxvk.verName = "3.1.1-x86_64";
+        dxvk.verCode = 1;
+        dxvk.remoteUrl = ASSET_URL_PREFIX + "contents/dxvk-3.1.1-x86_64.wcp";
+        list.add(dxvk);
+        return list;
+    }
+
+    /** Copies a bundled asset to the given file. Returns false on failure. */
+    public static boolean copyBundledAsset(Context context, String assetUrl, File out) {
+        if (assetUrl == null || !assetUrl.startsWith(ASSET_URL_PREFIX)) return false;
+        try (java.io.InputStream in = context.getAssets().open(assetUrl.substring(ASSET_URL_PREFIX.length()));
+             java.io.FileOutputStream os = new java.io.FileOutputStream(out)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) os.write(buffer, 0, read);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public void setRemoteProfiles(String json) {
         try {
             remoteProfiles = new ArrayList<>();
@@ -144,8 +172,10 @@ public class ContentsManager {
                     }
                 }
             }
-            if (remoteProfiles != null) {
-                for (ContentProfile remote : remoteProfiles) {
+            List<ContentProfile> catalogProfiles = new ArrayList<>(getBundledProfiles());
+            if (remoteProfiles != null) catalogProfiles.addAll(remoteProfiles);
+            {
+                for (ContentProfile remote : catalogProfiles) {
                     if (remote.type == type) {
                         boolean exists = false;
                         for (ContentProfile profile : profiles) {

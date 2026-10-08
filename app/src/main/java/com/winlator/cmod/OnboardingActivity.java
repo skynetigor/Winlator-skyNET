@@ -471,7 +471,10 @@ public class OnboardingActivity extends AppCompatActivity {
         io.execute(() -> {
             File archive = new File(getCacheDir(), "winz-component-" + System.nanoTime());
             try {
-                if (!download(item.url, archive, item.name)) throw new Exception("Download failed");
+                boolean fetched = item.url.startsWith(ContentsManager.ASSET_URL_PREFIX)
+                        ? ContentsManager.copyBundledAsset(this, item.url, archive)
+                        : download(item.url, archive, item.name);
+                if (!fetched) throw new Exception("Download failed");
                 installContentArchive(Uri.fromFile(archive), item.name, 72, () -> {
                     rebuildCatalog();
                     runOnUiThread(() -> finishInstall(id, null));

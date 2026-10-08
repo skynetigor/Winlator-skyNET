@@ -5,10 +5,15 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -33,6 +38,7 @@ public class DriverDownloadDialog {
     private final AdrenotoolsManager adrenotoolsManager;
     private AlertDialog dialog;
     private RecyclerView recyclerView;
+    private DriverAdapter adapter;
     private Runnable onDismissCallback;
     private final String repoUrl;
 
@@ -54,7 +60,31 @@ public class DriverDownloadDialog {
         recyclerView.setBackgroundColor(Color.BLACK);
         recyclerView.setLayoutManager(new LinearLayoutManager(context));
 
-        builder.setView(recyclerView);
+        EditText etSearch = new EditText(context);
+        etSearch.setHint("Search");
+        etSearch.setSingleLine(true);
+        etSearch.setTextColor(Color.WHITE);
+        etSearch.setHintTextColor(Color.GRAY);
+        etSearch.setInputType(InputType.TYPE_CLASS_TEXT);
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (adapter != null) adapter.filter(s.toString());
+            }
+        });
+
+        LinearLayout container = new LinearLayout(context);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setBackgroundColor(Color.BLACK);
+        int pad = (int) (12 * context.getResources().getDisplayMetrics().density);
+        container.setPadding(pad, pad / 2, pad, 0);
+        container.addView(etSearch, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        container.addView(recyclerView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        builder.setView(container);
         builder.setNegativeButton("Back", null); // English
 
         dialog = builder.create();
@@ -183,7 +213,8 @@ public class DriverDownloadDialog {
             Toast.makeText(context, "No drivers found.", Toast.LENGTH_LONG).show();
             return;
         }
-        recyclerView.setAdapter(new DriverAdapter(releases));
+        adapter = new DriverAdapter(releases);
+        recyclerView.setAdapter(adapter);
     }
 
     
@@ -200,8 +231,29 @@ public class DriverDownloadDialog {
 
     
     private class DriverAdapter extends RecyclerView.Adapter<DriverAdapter.ViewHolder> {
-        private final List<ReleaseItem> list;
-        public DriverAdapter(List<ReleaseItem> list) { this.list = list; }
+        private final List<ReleaseItem> all;
+        private List<ReleaseItem> list;
+        public DriverAdapter(List<ReleaseItem> list) { this.all = list; this.list = list; }
+
+        void filter(String query) {
+            String q = query == null ? "" : query.trim().toLowerCase();
+            if (q.isEmpty()) {
+                list = all;
+            } else {
+                List<ReleaseItem> result = new ArrayList<>();
+                for (ReleaseItem item : all) {
+                    boolean match = item.name.toLowerCase().contains(q);
+                    if (!match) {
+                        for (DriverAsset asset : item.assets) {
+                            if (asset.name.toLowerCase().contains(q)) { match = true; break; }
+                        }
+                    }
+                    if (match) result.add(item);
+                }
+                list = result;
+            }
+            notifyDataSetChanged();
+        }
 
         @Override
         public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
