@@ -46,6 +46,8 @@ interface OnboardingCallbacks {
     fun onBrowseLocal()
     fun onBrowseDriver()
     fun onRuntimeSelected(runtimeIdentifier: String)
+    /** The user chose to skip installing Wine/Proton and creating the first container. */
+    fun onSkipSetup()
     fun onRequestPermissions()
     fun onRetryCore()
     fun onCloseComponents()
@@ -290,7 +292,12 @@ private fun OnboardingFlow(
                 if (managerMode) cb.onCloseComponents()
                 else if (ready.value && hasInstalledRuntime) page = OnboardingPage.Runtime
             },
-            cb = cb
+            cb = cb,
+            // No Wine/Proton installed and no container yet: both can be done later from Settings.
+            onSkip = {
+                cb.onSkipSetup()
+                page = OnboardingPage.Access
+            }
         )
 
         OnboardingPage.Runtime -> OnboardingRuntimeSelectionScreen(
@@ -303,6 +310,10 @@ private fun OnboardingFlow(
                     cb.onRuntimeSelected(runtime)
                     prepareInitialContainer(activity, runtime, containerPreparing, containerReady)
                 }
+            },
+            onSkip = {
+                cb.onSkipSetup()
+                page = OnboardingPage.Access
             }
         )
 

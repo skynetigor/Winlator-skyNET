@@ -95,6 +95,8 @@ public class OnboardingActivity extends AppCompatActivity {
     private int coreProgress;
     private boolean installBusy;
     private boolean finishing;
+    /** Set when the user skipped the Wine/Proton install and first container; finishing then creates neither. */
+    private boolean skipSetup;
     private String selectedInitialWine;
     private String pendingInstallType;
     private String pendingInstallVersion;
@@ -166,7 +168,13 @@ public class OnboardingActivity extends AppCompatActivity {
                     }
 
                     @Override
+                    public void onSkipSetup() {
+                        skipSetup = true;
+                    }
+
+                    @Override
                     public void onRuntimeSelected(@NonNull String runtimeIdentifier) {
+                        skipSetup = false;
                         selectedInitialWine = runtimeIdentifier;
                         preferences.edit().putString(PREF_INITIAL_WINE, runtimeIdentifier).apply();
                     }
@@ -871,7 +879,7 @@ public class OnboardingActivity extends AppCompatActivity {
         finishing = true;
         contentsManager.syncContents();
         ContainerManager manager = new ContainerManager(this);
-        if (!manager.getContainers().isEmpty()) {
+        if (!manager.getContainers().isEmpty() || skipSetup) {
             enterMainApp();
             return;
         }

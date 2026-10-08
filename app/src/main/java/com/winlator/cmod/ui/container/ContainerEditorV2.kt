@@ -498,7 +498,11 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
     }
 
     fun createContainer() {
-        if (creating || state.runtime.isBlank()) return
+        if (creating) return
+        if (state.runtime.isBlank()) {
+            Toast.makeText(context, "Install a Wine or Proton version first (Settings > Components).", Toast.LENGTH_LONG).show()
+            return
+        }
         val wineInfo = WineInfo.fromIdentifier(context, contents, state.runtime)
         if (wineInfo.path.isNullOrBlank()) {
             Toast.makeText(context, "Selected Wine/Proton is not installed.", Toast.LENGTH_LONG).show()

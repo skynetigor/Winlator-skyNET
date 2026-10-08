@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,7 +48,8 @@ internal fun OnboardingRuntimeSelectionScreen(
     bundledInstalled: Boolean,
     preparing: Boolean,
     onBack: () -> Unit,
-    onContinue: (String) -> Unit
+    onContinue: (String) -> Unit,
+    onSkip: (() -> Unit)? = null
 ) {
     val runtimes = remember(components, bundledInstalled) {
         buildList {
@@ -143,6 +145,14 @@ internal fun OnboardingRuntimeSelectionScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Back")
+                }
+                if (onSkip != null) {
+                    TextButton(
+                        onClick = onSkip,
+                        enabled = !preparing,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("Skip for now") }
                 }
                 Button(
                     onClick = { if (selected.isNotBlank() && !preparing) onContinue(selected) },

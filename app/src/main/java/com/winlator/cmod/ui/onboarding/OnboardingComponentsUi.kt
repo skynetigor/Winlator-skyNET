@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -177,7 +178,8 @@ internal fun OnboardingComponentsScreen(
     managerMode: Boolean,
     onBack: () -> Unit,
     onContinue: () -> Unit,
-    cb: OnboardingCallbacks
+    cb: OnboardingCallbacks,
+    onSkip: (() -> Unit)? = null
 ) {
     var category by rememberSaveable { mutableStateOf("Recommended") }
     val landscape = LocalConfiguration.current.screenWidthDp > LocalConfiguration.current.screenHeightDp
@@ -330,7 +332,8 @@ internal fun OnboardingComponentsScreen(
             next = onContinue,
             landscape = landscape,
             nextEnabled = managerMode || hasInstalledRuntime,
-            nextLabel = if (managerMode) "Done" else "Continue"
+            nextLabel = if (managerMode) "Done" else "Continue",
+            skip = if (managerMode) null else onSkip
         )
     }
 }
@@ -610,7 +613,8 @@ private fun ComponentsFooter(
     next: () -> Unit,
     landscape: Boolean,
     nextEnabled: Boolean,
-    nextLabel: String
+    nextLabel: String,
+    skip: (() -> Unit)? = null
 ) {
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -628,6 +632,13 @@ private fun ComponentsFooter(
                 modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(12.dp)
             ) { Text("Back") }
+            if (skip != null) {
+                TextButton(
+                    onClick = skip,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("Skip for now") }
+            }
             Button(
                 onClick = next,
                 enabled = nextEnabled,
