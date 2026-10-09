@@ -435,6 +435,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
 
+        if (container.isLinux()) {
+            Toast.makeText(this, "Launching Linux containers is not available yet", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
         containerManager.activateContainer(container);
 
         if (shortcutPath != null && !shortcutPath.isEmpty()) {

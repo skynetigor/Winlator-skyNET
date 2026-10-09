@@ -17,7 +17,7 @@ public final class WineRuntimeGuard {
         if (runtimeIdentifier == null || runtimeIdentifier.isEmpty()) return null;
         ContainerManager manager = new ContainerManager(context);
         for (Container container : manager.getContainers()) {
-            if (runtimeIdentifier.equals(container.getWineVersion())) return container.getName();
+            if (!container.isLinux() && runtimeIdentifier.equals(container.getWineVersion())) return container.getName();
         }
         return null;
     }

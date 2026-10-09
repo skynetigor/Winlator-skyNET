@@ -1562,7 +1562,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
             return;
         }
         for (Container existingContainer : manager.getContainers()) {
-            if (selected.equals(existingContainer.getWineVersion())) {
+            if (!existingContainer.isLinux() && selected.equals(existingContainer.getWineVersion())) {
                 ContentDialog.alert(getContext(), String.format(getString(R.string.unable_to_remove_content_since_container_using), existingContainer.getName()), null);
                 return;
             }

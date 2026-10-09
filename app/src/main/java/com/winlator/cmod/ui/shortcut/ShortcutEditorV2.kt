@@ -422,7 +422,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         state.syncOpenGlEnvironment()
     }
     val manager = remember { ContainerManager(context) }
-    val containers = remember { manager.containers.toList() }
+    val containers = remember { manager.wineContainers.toList() }
 
     val runtimeOptions by produceState<List<WineRuntimeOption>>(emptyList()) {
         value = loadWineRuntimeOptions(context)

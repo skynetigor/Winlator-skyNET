@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -67,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,9 +83,11 @@ import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.PreloaderDialog
 import com.winlator.cmod.core.StringUtils
+import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
 import com.winlator.cmod.ui.container.GameContainerFragment
+import com.winlator.cmod.ui.container.LinuxContainerCreateFragment
 import com.winlator.cmod.ui.theme.WinZTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -141,7 +145,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
                         propertiesContainer = propertiesState.value,
                         onBack = { finish() },
                         onAdd = { openFragment(ContainerCreateComposeFragment()) },
-                        onEdit = { id -> openFragment(ContainerCreateComposeFragment.forEdit(id)) },
+                        onAddLinux = { openFragment(LinuxContainerCreateFragment()) },
+                        onEdit = { id -> editContainer(id) },
                         onProperties = { id ->
                             propertiesState.value = ContainerManager(this@ContainersSettingsActivity).getContainerById(id)
                         },
@@ -196,7 +201,19 @@ class ContainersSettingsActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun editContainer(id: Int) {
+        val container = ContainerManager(this).getContainerById(id)
+        openFragment(
+            if (container?.isLinux == true) LinuxContainerCreateFragment.forEdit(id)
+            else ContainerCreateComposeFragment.forEdit(id)
+        )
+    }
+
     private fun runContainer(id: Int) {
+        if (ContainerManager(this).getContainerById(id)?.isLinux == true) {
+            Toast.makeText(this, "Launching Linux containers is not available yet", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!XrActivity.isEnabled(this)) {
             startActivity(Intent(this, XServerDisplayActivity::class.java).putExtra("container_id", id))
         } else {
@@ -299,6 +316,7 @@ private fun ContainersSettingsScreen(
     propertiesContainer: Container?,
     onBack: () -> Unit,
     onAdd: () -> Unit,
+    onAddLinux: () -> Unit,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
     onDismissProperties: () -> Unit,
@@ -330,6 +348,14 @@ private fun ContainersSettingsScreen(
                         onClick = {
                             menuExpanded = false
                             onAdd()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Linux container") },
+                        leadingIcon = { Icon(Icons.Outlined.Terminal, null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAddLinux()
                         }
                     )
                     DropdownMenuItem(
@@ -404,12 +430,19 @@ private fun SettingsContainerCard(
         Column {
             Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(50.dp), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Dns, null, modifier = Modifier.size(26.dp)) }
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(if (container.isLinux) Icons.Outlined.Terminal else Icons.Outlined.Dns, null, modifier = Modifier.size(26.dp))
+                    }
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
                     Text(container.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${container.wineVersion} • ${container.screenSize}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val subtitle = if (container.isLinux) {
+                        val context = LocalContext.current
+                        val runtime = remember(container.id) { LinuxRuntime.installedVersion(context) }
+                        "Linux • ${runtime.ifEmpty { "runtime missing" }} • ${container.screenSize}"
+                    } else "${container.wineVersion} • ${container.screenSize}"
+                    Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Surface(
                     onClick = { onRun(container.id) },
@@ -431,7 +464,8 @@ private fun SettingsContainerCard(
                     modifier = Modifier.weight(1f),
                     onDuplicate = { onDuplicate(container.id) },
                     onRemove = { onRemove(container.id) },
-                    onExport = { onExport(container.id) }
+                    onExport = { onExport(container.id) },
+                    canExport = !container.isLinux
                 )
             }
         }
@@ -463,7 +497,8 @@ private fun ContainerMoreButton(
     modifier: Modifier = Modifier,
     onDuplicate: () -> Unit,
     onRemove: () -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    canExport: Boolean = true
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
@@ -477,7 +512,7 @@ private fun ContainerMoreButton(
                     onDuplicate()
                 }
             )
-            DropdownMenuItem(
+            if (canExport) DropdownMenuItem(
                 text = { Text("Export settings") },
                 leadingIcon = { Icon(Icons.Outlined.FileUpload, null) },
                 onClick = {

@@ -51,6 +51,13 @@ public class ContainerManager {
         return containers;
     }
 
+    /** The containers that run Windows programs; Linux containers have no Wine prefix or drives. */
+    public ArrayList<Container> getWineContainers() {
+        ArrayList<Container> result = new ArrayList<>();
+        for (Container container : containers) if (!container.isLinux()) result.add(container);
+        return result;
+    }
+
     // Load containers from the home directory
     private void loadContainers() {
         containers.clear();
@@ -121,6 +128,46 @@ public class ContainerManager {
             final Container container = createContainer(data, contentsManager);
             handler.post(() -> callback.call(container));
         });
+    }
+
+    /** Creates a Linux container: just a directory with a config and a home, no Wine prefix. */
+    public void createLinuxContainerAsync(final JSONObject data, Callback<Container> callback) {
+        final Handler handler = new Handler();
+        Executors.newSingleThreadExecutor().execute(() -> {
+            final Container container = createLinuxContainer(data);
+            handler.post(() -> callback.call(container));
+        });
+    }
+
+    private Container createLinuxContainer(JSONObject data) {
+        try {
+            int id = findNextContainerId();
+            data.put("id", id);
+            data.put("type", Container.TYPE_LINUX);
+
+            File containerDir = new File(homeDir, ImageFs.USER + "-" + id);
+            if (!containerDir.mkdirs()) {
+                Log.e("ContainerManager", "Unable to create container directory: " + containerDir);
+                return null;
+            }
+
+            Container container = new Container(id, this);
+            container.setRootDir(containerDir);
+            container.loadData(data);
+
+            if (!container.getLinuxHomeDir().mkdirs()) {
+                FileUtils.delete(containerDir);
+                return null;
+            }
+
+            container.saveData();
+            maxContainerId = Math.max(maxContainerId, id);
+            containers.add(container);
+            return container;
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return null;
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {
@@ -200,6 +247,7 @@ public class ContainerManager {
         Container dstContainer = new Container(id, this);
         dstContainer.setRootDir(dstDir);
         dstContainer.setName(srcContainer.getName() + " (" + context.getString(R.string._copy) + ")");
+        dstContainer.setType(srcContainer.getType());
         dstContainer.setScreenSize(srcContainer.getScreenSize());
         dstContainer.setEnvVars(srcContainer.getEnvVars());
         dstContainer.setCPUList(srcContainer.getCPUList());

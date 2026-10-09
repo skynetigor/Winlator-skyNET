@@ -724,7 +724,7 @@ public class ShortcutsFragment extends Fragment {
         }
         else if (LibraryComposeHost.ACTION_CLONE.equals(action)) {
             ContainerManager containerManager = new ContainerManager(context);
-            ArrayList<Container> containers = containerManager.getContainers();
+            ArrayList<Container> containers = containerManager.getWineContainers();
             AlertDialog.Builder builder = new AlertDialog.Builder(context);
             builder.setTitle("Select a container");
             String[] containerNames = new String[containers.size()];

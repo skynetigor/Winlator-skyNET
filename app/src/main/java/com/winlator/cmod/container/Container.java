@@ -43,8 +43,11 @@ public class Container {
     public static final byte STARTUP_SELECTION_ESSENTIAL = 1;
     public static final byte STARTUP_SELECTION_AGGRESSIVE = 2;
     public static final byte MAX_DRIVE_LETTERS = 26;
+    public static final String TYPE_WINE = "wine";
+    public static final String TYPE_LINUX = "linux";
     public final int id;
     private String name;
+    private String type = TYPE_WINE;
     private String screenSize = DEFAULT_SCREEN_SIZE;
     private String envVars = DEFAULT_ENV_VARS;
     private String graphicsDriver = DEFAULT_GRAPHICS_DRIVER;
@@ -105,6 +108,23 @@ public class Container {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = TYPE_LINUX.equals(type) ? TYPE_LINUX : TYPE_WINE;
+    }
+
+    public boolean isLinux() {
+        return TYPE_LINUX.equals(type);
+    }
+
+    /** Home directory of a Linux container; a later step binds it as /root inside the session. */
+    public File getLinuxHomeDir() {
+        return new File(rootDir, "linux-home");
     }
 
     public String getScreenSize() {
@@ -483,6 +503,7 @@ public class Container {
             JSONObject data = new JSONObject();
             data.put("id", id);
             data.put("name", name);
+            if (isLinux()) data.put("type", type);
             data.put("screenSize", screenSize);
             data.put("envVars", envVars);
             data.put("cpuList", cpuList);
@@ -533,6 +554,9 @@ public class Container {
             switch (key) {
                 case "name" :
                     setName(data.getString(key));
+                    break;
+                case "type" :
+                    setType(data.getString(key));
                     break;
                 case "screenSize" :
                     setScreenSize(data.getString(key));

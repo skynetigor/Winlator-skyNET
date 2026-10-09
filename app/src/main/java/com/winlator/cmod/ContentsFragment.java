@@ -345,7 +345,7 @@ public class ContentsFragment extends Fragment {
                             if (profile.type == ContentProfile.ContentType.CONTENT_TYPE_WINE || profile.type == ContentProfile.ContentType.CONTENT_TYPE_PROTON) {
                                 ContainerManager containerManager = new ContainerManager(getContext());
                                 for (Container container : containerManager.getContainers()) {
-                                    if (container.getWineVersion().equals(ContentsManager.getEntryName(profile))) {
+                                    if (!container.isLinux() && container.getWineVersion().equals(ContentsManager.getEntryName(profile))) {
                                         ContentDialog.alert(getContext(), String.format(getString(R.string.unable_to_remove_content_since_container_using), container.getName()), null);
                                         return;
                                     }
