@@ -33,6 +33,10 @@ import com.winlator.cmod.core.OpenGLDriverDefaults;
 import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
+import com.winlator.cmod.linux.LinuxRuntime;
+import com.winlator.cmod.linux.LinuxRuntimeCatalog;
+import com.winlator.cmod.linux.LinuxRuntimeInstallTask;
+import com.winlator.cmod.linux.LinuxRuntimeInstaller;
 import com.winlator.cmod.fexcore.FEXCorePreset;
 import com.winlator.cmod.ui.onboarding.OnboardingCallbacks;
 import com.winlator.cmod.ui.onboarding.OnboardingComponent;
@@ -75,6 +79,7 @@ public class OnboardingActivity extends AppCompatActivity {
             ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER) != null
                     ? ProtonPackageManager.getPackage(ProtonPackageManager.DEFAULT_IDENTIFIER).title
                     : ProtonPackageManager.DEFAULT_IDENTIFIER;
+    private static final String LINUX_RUNTIME_PREFIX = "linux-runtime:";
     private static final int REQUEST_STORAGE = 820;
     private static final int REQUEST_NOTIFICATIONS = 821;
     private static final int REQUEST_LOCAL_COMPONENT = 822;
@@ -85,6 +90,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ArrayList<ComponentItem> catalog = new ArrayList<>();
     private final ArrayList<RemoteDriverCatalog.Entry> remoteDrivers = new ArrayList<>();
+    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRuntimes = new ArrayList<>();
 
     private SharedPreferences preferences;
     private ContentsManager contentsManager;
@@ -134,6 +140,12 @@ public class OnboardingActivity extends AppCompatActivity {
                         ComponentItem item = findComponent(componentId);
                         if (item != null) installComponent(item);
                         else if (componentId.startsWith("remote-driver:")) installRemoteDriver(componentId);
+                        else if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) installLinuxRuntime(componentId);
+                    }
+
+                    @Override
+                    public void onCancel(@NonNull String componentId) {
+                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) LinuxRuntimeInstallTask.cancel();
                     }
 
                     @Override
@@ -199,7 +211,20 @@ public class OnboardingActivity extends AppCompatActivity {
         syncComposeCatalog();
         loadCatalog();
         loadRemoteDrivers();
+        loadLinuxRuntimes();
         if (!coreReady) startCoreInstallation();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        LinuxRuntimeInstallTask.setListener(linuxInstallListener);
+    }
+
+    @Override
+    protected void onPause() {
+        LinuxRuntimeInstallTask.setListener(null);
+        super.onPause();
     }
 
     @Override
@@ -464,6 +489,36 @@ public class OnboardingActivity extends AppCompatActivity {
                 ));
             }
         }
+        Set<String> catalogRuntimeIds = new HashSet<>();
+        synchronized (linuxRuntimes) {
+            for (LinuxRuntimeCatalog.Entry runtime : linuxRuntimes) {
+                catalogRuntimeIds.add(runtime.id);
+                boolean installed = LinuxRuntime.isInstalled(this, runtime.id);
+                String detail = null;
+                boolean blocked = false;
+                if (!installed) {
+                    long needed = LinuxRuntimeInstaller.requiredBytes(runtime);
+                    long free = getFilesDir().getUsableSpace();
+                    blocked = runtime.size > 0 && free < needed;
+                    detail = formatSize(runtime.size) + " download \u00b7 needs ~" + formatSize(needed)
+                            + " free \u00b7 " + formatSize(free) + " free"
+                            + (LinuxRuntimeInstaller.hasPartial(this, runtime) ? " \u00b7 partly downloaded, will resume" : "");
+                }
+                ui.add(new OnboardingComponent(
+                        LINUX_RUNTIME_PREFIX + runtime.id, "Linux Runtime", runtime.name, installed, false, installed,
+                        null, LinuxRuntime.containerUsing(this, runtime.id) != null, false, runtime.channel,
+                        detail, blocked, true
+                ));
+            }
+        }
+        for (LinuxRuntime.Installed runtime : LinuxRuntime.listInstalled(this)) {
+            if (catalogRuntimeIds.contains(runtime.id)) continue;
+            ui.add(new OnboardingComponent(
+                    LINUX_RUNTIME_PREFIX + runtime.id, "Linux Runtime", runtime.name, true, false, true,
+                    null, LinuxRuntime.containerUsing(this, runtime.id) != null, false, null,
+                    null, false, true
+            ));
+        }
         composeController.setComponents(ui);
         refreshBundledRuntimeState();
     }
@@ -637,7 +692,105 @@ public class OnboardingActivity extends AppCompatActivity {
         return null;
     }
 
+    private String formatSize(long bytes) {
+        if (bytes >= (1L << 30)) return String.format(Locale.US, "%.1f GB", bytes / (double)(1L << 30));
+        return (bytes >> 20) + " MB";
+    }
+
+    private final LinuxRuntimeInstallTask.Listener linuxInstallListener = new LinuxRuntimeInstallTask.Listener() {
+        @Override
+        public void onProgress(String id, LinuxRuntimeInstaller.Phase phase, int percent) {
+            if (composeController == null) return;
+            installBusy = true;
+            composeController.setInstallBusy(LINUX_RUNTIME_PREFIX + id, true);
+            switch (phase) {
+                case DOWNLOAD:
+                    composeController.updateInstallProgress("Downloading", percent * 80 / 100);
+                    break;
+                case VERIFY:
+                    composeController.updateInstallProgress("Verifying", 80 + percent * 5 / 100);
+                    break;
+                default:
+                    composeController.updateInstallProgress("Unpacking", 85 + percent * 15 / 100);
+            }
+        }
+
+        @Override
+        public void onFinished(String id, String error) {
+            if (composeController == null) return;
+            installBusy = false;
+            composeController.setInstallBusy(null, false);
+            syncComposeCatalog();
+            if (error != null && !LinuxRuntimeInstaller.CANCELLED.equals(error)) {
+                Toast.makeText(OnboardingActivity.this, error, Toast.LENGTH_LONG).show();
+            }
+        }
+    };
+
+    private void loadLinuxRuntimes() {
+        io.execute(() -> {
+            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetch();
+            if (loaded == null) return;
+            synchronized (linuxRuntimes) {
+                linuxRuntimes.clear();
+                linuxRuntimes.addAll(loaded);
+            }
+            runOnUiThread(this::syncComposeCatalog);
+        });
+    }
+
+    private void installLinuxRuntime(String componentId) {
+        if (installBusy) return;
+        LinuxRuntimeCatalog.Entry found = null;
+        synchronized (linuxRuntimes) {
+            for (LinuxRuntimeCatalog.Entry runtime : linuxRuntimes) {
+                if ((LINUX_RUNTIME_PREFIX + runtime.id).equals(componentId)) found = runtime;
+            }
+        }
+        if (found == null) return;
+        if (LinuxRuntimeInstallTask.start(this, found)) {
+            installBusy = true;
+            composeController.setInstallBusy(componentId, true);
+            composeController.updateInstallProgress("Starting", 0);
+        }
+    }
+
+    private void requestRemoveLinuxRuntime(String componentId) {
+        String id = componentId.substring(LINUX_RUNTIME_PREFIX.length());
+        String using = LinuxRuntime.containerUsing(this, id);
+        if (using != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Runtime is in use")
+                    .setMessage("This Linux runtime cannot be deleted because it is used by " + using + ".")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Linux runtime?")
+                .setMessage("The installed runtime files will be removed. You can download it again later.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Delete", (d, w) -> {
+                    if (installBusy) return;
+                    installBusy = true;
+                    composeController.setInstallBusy(componentId, true);
+                    io.execute(() -> {
+                        LinuxRuntime.remove(this, id);
+                        runOnUiThread(() -> {
+                            installBusy = false;
+                            composeController.setInstallBusy(null, false);
+                            syncComposeCatalog();
+                        });
+                    });
+                })
+                .show();
+    }
+
     private void requestRemoveComponent(String componentId) {
+        if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) {
+            requestRemoveLinuxRuntime(componentId);
+            return;
+        }
         if (componentId.startsWith("adrenotools:")) {
             new AlertDialog.Builder(this)
                     .setTitle("Delete driver?")

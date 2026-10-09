@@ -439,8 +439,10 @@ private fun SettingsContainerCard(
                     Text(container.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = if (container.isLinux) {
                         val context = LocalContext.current
-                        val runtime = remember(container.id) { LinuxRuntime.installedVersion(context) }
-                        "Linux • ${runtime.ifEmpty { "runtime missing" }} • ${container.screenSize}"
+                        val runtime = remember(container.id, container.linuxRuntime) {
+                            LinuxRuntime.resolve(context, container)?.name ?: "runtime missing"
+                        }
+                        "Linux • $runtime • ${container.screenSize}"
                     } else "${container.wineVersion} • ${container.screenSize}"
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

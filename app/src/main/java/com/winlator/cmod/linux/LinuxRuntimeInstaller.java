@@ -4,13 +4,11 @@ import android.content.Context;
 import android.system.Os;
 import android.util.Log;
 
-import com.winlator.cmod.contents.Downloader;
 import com.winlator.cmod.core.FileUtils;
 
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream;
-import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -20,13 +18,17 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.security.MessageDigest;
 
-/** Downloads the Linux runtime tarball, checks it and swaps it into files/linuxfs. */
+/**
+ * Downloads a Linux runtime tarball (resuming a partial download), checks it and swaps it into
+ * files/linux-runtimes/&lt;id&gt;. Blocking; run it off the main thread.
+ */
 public final class LinuxRuntimeInstaller {
     private static final String TAG = "LinuxRuntimeInstaller";
-    private static final String CATALOG_URL =
-            "https://raw.githubusercontent.com/The412Banner/winlator-contents/main/linuxfs.json";
+    public static final String CANCELLED = "Cancelled";
 
     public enum Phase { DOWNLOAD, VERIFY, EXTRACT }
 
@@ -34,76 +36,82 @@ public final class LinuxRuntimeInstaller {
         void onProgress(Phase phase, int percent);
     }
 
-    public static final class Release {
-        public final String version;
-        public final String url;
-        public final String sha256;
-        public final long size;
-
-        Release(String version, String url, String sha256, long size) {
-            this.version = version;
-            this.url = url;
-            this.sha256 = sha256;
-            this.size = size;
+    private static final class CancelledException extends IOException {
+        CancelledException() {
+            super(CANCELLED);
         }
     }
 
+    private static volatile boolean cancelRequested;
     private static volatile boolean installing;
 
     private LinuxRuntimeInstaller() {}
 
-    public static Release fetchRelease() {
-        String json = Downloader.downloadString(CATALOG_URL);
-        if (json == null) return null;
-        try {
-            JSONObject data = new JSONObject(json);
-            String url = data.getString("url");
-            if (!url.startsWith("https://")) return null;
-            return new Release(data.getString("version"), url, data.getString("sha256"),
-                    data.optLong("size", 0));
-        }
-        catch (Exception e) {
-            Log.e(TAG, "Bad runtime catalog", e);
-            return null;
-        }
+    /** Disk space an install needs: the tarball, the unpacked tree and the swap copy. */
+    public static long requiredBytes(LinuxRuntimeCatalog.Entry entry) {
+        return entry.size * 4;
     }
 
-    /** Finishes or undoes a swap that was cut short. Safe to call at any time. */
-    public static void recoverInterruptedSwap(Context context) {
+    public static void cancel() {
+        cancelRequested = true;
+    }
+
+    private static File downloadDir(Context context) {
+        return new File(LinuxRuntime.runtimesDir(context), ".download");
+    }
+
+    /** True when a partial download for this runtime is waiting to be resumed. */
+    public static boolean hasPartial(Context context, LinuxRuntimeCatalog.Entry entry) {
+        return partFile(context, entry).length() > 0;
+    }
+
+    private static File partFile(Context context, LinuxRuntimeCatalog.Entry entry) {
+        return new File(downloadDir(context), entry.id + ".tar.zst.part");
+    }
+
+    /** Finishes or undoes swaps that were cut short. Safe to call at any time. */
+    public static void recoverInterruptedSwaps(Context context) {
         if (installing) return;
-        File root = LinuxRuntime.rootDir(context);
-        File old = new File(root.getPath() + ".old");
-        if (!root.exists() && old.exists()) old.renameTo(root);
+        File[] files = LinuxRuntime.runtimesDir(context).listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (!name.endsWith(".old")) continue;
+            File root = new File(file.getParentFile(), name.substring(0, name.length() - 4));
+            if (!root.exists()) file.renameTo(root);
+        }
     }
 
-    /** Blocking. Returns null on success or a short message describing what went wrong. */
-    public static synchronized String install(Context context, Release release, Progress progress) {
-        recoverInterruptedSwap(context);
-
-        File filesDir = context.getFilesDir();
-        if (release.size > 0 && filesDir.getUsableSpace() < release.size * 4) {
-            return "Not enough free space: about " + (release.size * 4 >> 20) + " MB needed";
-        }
-
-        File archive = new File(context.getCacheDir(), "linuxfs.tar.zst");
-        File staging = new File(filesDir, "linuxfs.new");
-        File root = LinuxRuntime.rootDir(context);
-        File old = new File(root.getPath() + ".old");
-
+    /** Returns null on success or a short message; {@link #CANCELLED} if the user cancelled. */
+    public static synchronized String install(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
+        cancelRequested = false;
         installing = true;
+        File runtimes = LinuxRuntime.runtimesDir(context);
+        File root = LinuxRuntime.rootDir(context, entry.id);
+        File staging = new File(runtimes, entry.id + ".new");
+        File old = new File(runtimes, entry.id + ".old");
+        File part = partFile(context, entry);
         try {
-            progress.onProgress(Phase.DOWNLOAD, 0);
-            if (!Downloader.downloadFile(release.url, archive, p -> progress.onProgress(Phase.DOWNLOAD, p))) {
-                return "Download failed";
+            runtimes.mkdirs();
+            downloadDir(context).mkdirs();
+
+            long needed = requiredBytes(entry) - part.length();
+            if (entry.size > 0 && context.getFilesDir().getUsableSpace() < needed) {
+                return "Not enough free space: about " + (needed >> 20) + " MB needed";
             }
 
+            if (!download(entry, part, progress)) return "Download failed";
+
             progress.onProgress(Phase.VERIFY, 0);
-            if (!release.sha256.equalsIgnoreCase(sha256(archive))) return "Checksum mismatch";
+            if (!entry.sha256.equalsIgnoreCase(sha256(part, progress))) {
+                part.delete();
+                return "Checksum mismatch";
+            }
 
             FileUtils.delete(staging);
             if (!staging.mkdirs()) return "Cannot create " + staging;
-            extract(archive, staging, progress);
-            FileUtils.writeString(new File(staging, ".version"), release.version);
+            extract(part, staging, progress);
+            LinuxRuntime.writeInfo(staging, entry.id, entry.name, entry.version);
 
             FileUtils.delete(old);
             if (root.exists() && !root.renameTo(old)) return "Cannot replace the installed runtime";
@@ -112,7 +120,11 @@ public final class LinuxRuntimeInstaller {
                 return "Cannot move the new runtime into place";
             }
             FileUtils.delete(old);
+            part.delete();
             return null;
+        }
+        catch (CancelledException e) {
+            return CANCELLED;
         }
         catch (Exception e) {
             Log.e(TAG, "Install failed", e);
@@ -120,17 +132,112 @@ public final class LinuxRuntimeInstaller {
         }
         finally {
             installing = false;
-            archive.delete();
             if (staging.exists()) FileUtils.delete(staging);
         }
     }
 
-    private static String sha256(File file) throws Exception {
+    /** Downloads to {@code part}, continuing from its current length. The partial file survives failures. */
+    private static boolean download(LinuxRuntimeCatalog.Entry entry, File part, Progress progress) throws IOException {
+        long existing = part.length();
+        HttpURLConnection connection = open(entry.url, existing);
+        try {
+            int code = connection.getResponseCode();
+            if (code == 416) {
+                // The server has nothing past our offset: either the file is whole, or the partial is bogus.
+                if (entry.size > 0 && existing == entry.size) {
+                    progress.onProgress(Phase.DOWNLOAD, 100);
+                    return true;
+                }
+                part.delete();
+                connection.disconnect();
+                existing = 0;
+                connection = open(entry.url, 0);
+                code = connection.getResponseCode();
+            }
+            boolean append = code == 206 && existing > 0;
+            if (code != 200 && code != 206) {
+                Log.e(TAG, "Download answered HTTP " + code);
+                return false;
+            }
+            if (!append) existing = 0;
+
+            long total = entry.size > 0 ? entry.size : connection.getContentLengthLong() + existing;
+            long done = existing;
+            int lastPercent = -1;
+            try (InputStream in = connection.getInputStream();
+                 OutputStream out = new FileOutputStream(part, append)) {
+                byte[] buffer = new byte[1 << 16];
+                int count;
+                while ((count = in.read(buffer)) != -1) {
+                    if (cancelRequested) throw new CancelledException();
+                    out.write(buffer, 0, count);
+                    done += count;
+                    int percent = total > 0 ? (int)Math.min(100, done * 100 / total) : 0;
+                    if (percent != lastPercent) {
+                        lastPercent = percent;
+                        progress.onProgress(Phase.DOWNLOAD, percent);
+                    }
+                }
+            }
+            if (entry.size > 0 && done < entry.size) {
+                Log.e(TAG, "Download ended early at " + done + " of " + entry.size);
+                return false;
+            }
+            return true;
+        }
+        catch (CancelledException e) {
+            throw e;
+        }
+        catch (IOException e) {
+            Log.e(TAG, "Download interrupted", e);
+            return false;
+        }
+        finally {
+            connection.disconnect();
+        }
+    }
+
+    /** Opens the URL, following redirects by hand so the Range header survives them (GitHub redirects). */
+    private static HttpURLConnection open(String address, long offset) throws IOException {
+        String current = address;
+        for (int hop = 0; hop < 6; hop++) {
+            HttpURLConnection connection = (HttpURLConnection)new URL(current).openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(30000);
+            if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-");
+            int code = connection.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null) throw new IOException("Redirect without a location");
+                current = new URL(new URL(current), location).toString();
+                if (!current.startsWith("https://")) throw new IOException("Redirect to a non-HTTPS address");
+                continue;
+            }
+            return connection;
+        }
+        throw new IOException("Too many redirects");
+    }
+
+    private static String sha256(File file, Progress progress) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        long total = Math.max(1, file.length());
+        long done = 0;
+        int lastPercent = -1;
         try (InputStream in = new FileInputStream(file)) {
             byte[] buffer = new byte[1 << 16];
             int count;
-            while ((count = in.read(buffer)) != -1) digest.update(buffer, 0, count);
+            while ((count = in.read(buffer)) != -1) {
+                if (cancelRequested) throw new CancelledException();
+                digest.update(buffer, 0, count);
+                done += count;
+                int percent = (int)(done * 100 / total);
+                if (percent != lastPercent) {
+                    lastPercent = percent;
+                    progress.onProgress(Phase.VERIFY, percent);
+                }
+            }
         }
         StringBuilder hex = new StringBuilder();
         for (byte b : digest.digest()) hex.append(String.format("%02x", b));
@@ -180,6 +287,8 @@ public final class LinuxRuntimeInstaller {
             TarArchiveEntry entry;
             byte[] buffer = new byte[1 << 16];
             while ((entry = tar.getNextTarEntry()) != null) {
+                if (cancelRequested) throw new CancelledException();
+
                 File raw = new File(destination, entry.getName());
                 File parent = raw.getParentFile();
                 if (parent == null) continue;

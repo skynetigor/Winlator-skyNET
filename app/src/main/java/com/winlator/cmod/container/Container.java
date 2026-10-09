@@ -48,6 +48,7 @@ public class Container {
     public final int id;
     private String name;
     private String type = TYPE_WINE;
+    private String linuxRuntime = "";
     private String screenSize = DEFAULT_SCREEN_SIZE;
     private String envVars = DEFAULT_ENV_VARS;
     private String graphicsDriver = DEFAULT_GRAPHICS_DRIVER;
@@ -120,6 +121,15 @@ public class Container {
 
     public boolean isLinux() {
         return TYPE_LINUX.equals(type);
+    }
+
+    /** Id of the Linux runtime this container runs in; empty until one is chosen. */
+    public String getLinuxRuntime() {
+        return linuxRuntime;
+    }
+
+    public void setLinuxRuntime(String linuxRuntime) {
+        this.linuxRuntime = linuxRuntime != null ? linuxRuntime : "";
     }
 
     /** Home directory of a Linux container; a later step binds it as /root inside the session. */
@@ -503,7 +513,10 @@ public class Container {
             JSONObject data = new JSONObject();
             data.put("id", id);
             data.put("name", name);
-            if (isLinux()) data.put("type", type);
+            if (isLinux()) {
+                data.put("type", type);
+                data.put("linuxRuntime", linuxRuntime);
+            }
             data.put("screenSize", screenSize);
             data.put("envVars", envVars);
             data.put("cpuList", cpuList);
@@ -557,6 +570,9 @@ public class Container {
                     break;
                 case "type" :
                     setType(data.getString(key));
+                    break;
+                case "linuxRuntime" :
+                    setLinuxRuntime(data.getString(key));
                     break;
                 case "screenSize" :
                     setScreenSize(data.getString(key));

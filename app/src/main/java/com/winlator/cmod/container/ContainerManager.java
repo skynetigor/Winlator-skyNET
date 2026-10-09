@@ -248,6 +248,7 @@ public class ContainerManager {
         dstContainer.setRootDir(dstDir);
         dstContainer.setName(srcContainer.getName() + " (" + context.getString(R.string._copy) + ")");
         dstContainer.setType(srcContainer.getType());
+        dstContainer.setLinuxRuntime(srcContainer.getLinuxRuntime());
         dstContainer.setScreenSize(srcContainer.getScreenSize());
         dstContainer.setEnvVars(srcContainer.getEnvVars());
         dstContainer.setCPUList(srcContainer.getCPUList());
