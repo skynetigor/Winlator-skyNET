@@ -19,6 +19,8 @@ public abstract class AtomRequests {
         inputStream.skip(2);
         String name = inputStream.readString8(length);
         int id = onlyIfExists ? Atom.getId(name) : Atom.internAtom(name);
+        // With only-if-exists an unknown name is not an error: the reply carries the atom None (0).
+        if (id < 0 && onlyIfExists) id = 0;
         if (id < 0) throw new BadAtom(id);
 
         try (XStreamLock lock = outputStream.lock()) {

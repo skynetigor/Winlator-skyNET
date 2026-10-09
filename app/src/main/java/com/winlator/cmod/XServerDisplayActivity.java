@@ -1251,6 +1251,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     }
 
+    /** A Linux program ended: a failure is explained to the user before the session is closed. */
+    private void onLinuxProgramExit(LinuxProgramLauncherComponent launcher, int prootStatus) {
+        int status = launcher.guestStatus(prootStatus);
+        if (status == 0 || exiting.get() || isFinishing() || isDestroyed()) {
+            exit();
+            return;
+        }
+        preloaderDialog.closeOnUiThread();
+        String reason = status > 128
+                ? "was stopped by signal " + (status - 128) + (status == 139 ? " (a crash)" : "")
+                : "exited with code " + status;
+        String output = launcher.lastOutput(12);
+        String message = "The program " + reason + " after " + launcher.secondsRunning() + " s."
+                + (output.isEmpty() ? "" : "\n\n" + output);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("The program stopped")
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, (d, w) -> exit())
+                .setOnCancelListener(d -> exit())
+                .show();
+    }
+
     /** Starts the X server, audio and the Linux program (the desktop, or the shortcut's program) under proot. */
     private void setupLinuxEnvironment() {
         String rootPath = imageFs.getRootDir().getPath();
@@ -1271,7 +1293,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String[] command = LinuxSession.programCommand(shortcut.path);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
-        launcher.setTerminationCallback((status) -> runOnUiThread(this::exit));
+        // The output reader runs on its own thread: a moment is left for the last lines (which say how the
+        // program ended) to arrive before the result is read from them.
+        launcher.setTerminationCallback((status) -> runOnUiThread(
+                () -> handler.postDelayed(() -> onLinuxProgramExit(launcher, status), 500)));
         environment.addComponent(launcher);
 
         environment.startEnvironmentComponents();

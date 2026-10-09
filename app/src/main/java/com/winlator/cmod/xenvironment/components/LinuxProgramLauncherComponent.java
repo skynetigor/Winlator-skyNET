@@ -35,6 +35,16 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
     private final Object lock = new Object();
     private int pid = -1;
     private Thread reaper;
+    private long startedAt;
+
+    /** The last lines the program (and proot) printed, kept for the message shown when it fails. */
+    private final java.util.ArrayDeque<String> tail = new java.util.ArrayDeque<>();
+    private final Callback<String> outputCallback = line -> {
+        synchronized (tail) {
+            tail.add(line);
+            while (tail.size() > 80) tail.poll();
+        }
+    };
 
     public LinuxProgramLauncherComponent(Container container, LinuxRuntime.Installed runtime, String[] guestCommand) {
         this.container = container;
@@ -51,6 +61,9 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
         LinuxSession.Launch launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
+        // Registering a callback also makes ProcessHelper pipe the output instead of discarding it.
+        ProcessHelper.addDebugCallback(outputCallback);
+        startedAt = System.currentTimeMillis();
         synchronized (lock) {
             pid = ProcessHelper.exec(launch.argv, launch.hostEnv, launch.workingDir, status -> {
                 synchronized (lock) {
@@ -109,8 +122,45 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         return mask == all ? 0 : mask;
     }
 
+    /**
+     * The guest program's own result. proot's exit code does not say whether the program crashed, but it
+     * prints "vpid 1: terminated with signal N" or "vpid 1: exited with status N" for the first guest process.
+     */
+    public int guestStatus(int prootStatus) {
+        java.util.regex.Pattern pattern =
+                java.util.regex.Pattern.compile("vpid 1: (terminated with signal|exited with status) (\\d+)");
+        synchronized (tail) {
+            for (java.util.Iterator<String> it = tail.descendingIterator(); it.hasNext(); ) {
+                java.util.regex.Matcher matcher = pattern.matcher(it.next());
+                if (!matcher.find()) continue;
+                int value = Integer.parseInt(matcher.group(2));
+                return matcher.group(1).startsWith("terminated") ? 128 + value : value;
+            }
+        }
+        return prootStatus;
+    }
+
+    /** Seconds since the program was started. */
+    public long secondsRunning() {
+        return (System.currentTimeMillis() - startedAt) / 1000;
+    }
+
+    /** The last output lines worth showing to the user (proot's own sandbox warnings are left out). */
+    public String lastOutput(int maxLines) {
+        java.util.ArrayList<String> lines = new java.util.ArrayList<>();
+        synchronized (tail) {
+            for (String line : tail) {
+                if (line.contains("can't sanitize binding")) continue;
+                lines.add(line.replace("proot info: ", ""));
+            }
+        }
+        int from = Math.max(0, lines.size() - maxLines);
+        return String.join("\n", lines.subList(from, lines.size()));
+    }
+
     @Override
     public void stop() {
+        ProcessHelper.removeDebugCallback(outputCallback);
         final int root;
         synchronized (lock) {
             root = pid;

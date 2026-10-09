@@ -376,10 +376,10 @@ private fun LinuxContainerEditor(
                 SettingMappedChoice(
                     "OpenGL driver",
                     glDriver,
-                    linkedMapOf("software" to "Software (llvmpipe)", "zink" to "Zink on Turnip")
+                    linkedMapOf("software" to "Software (llvmpipe)", "zink" to "Zink on Turnip (experimental, not working yet)")
                 ) { glDriver = it }
                 SettingsDivider()
-                SettingToggle("Software Vulkan output (CPU copy)", softwareOutput) { softwareOutput = it }
+                SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
             }
 
             SectionTitle("Performance")
