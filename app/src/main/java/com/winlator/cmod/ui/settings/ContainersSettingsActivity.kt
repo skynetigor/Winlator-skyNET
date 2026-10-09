@@ -210,10 +210,6 @@ class ContainersSettingsActivity : AppCompatActivity() {
     }
 
     private fun runContainer(id: Int) {
-        if (ContainerManager(this).getContainerById(id)?.isLinux == true) {
-            Toast.makeText(this, "Launching Linux containers is not available yet", Toast.LENGTH_SHORT).show()
-            return
-        }
         if (!XrActivity.isEnabled(this)) {
             startActivity(Intent(this, XServerDisplayActivity::class.java).putExtra("container_id", id))
         } else {

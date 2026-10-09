@@ -76,6 +76,9 @@ import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.linux.LinuxRuntime;
+import com.winlator.cmod.linux.LinuxSession;
+import com.winlator.cmod.xenvironment.components.LinuxProgramLauncherComponent;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
@@ -174,6 +177,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private KeyValueSet dxwrapperConfig;
     private String startupSelection;
     private WineInfo wineInfo;
+    /** True when the container is a Linux container: the session runs under proot instead of Wine. */
+    private boolean linuxSession;
+    private LinuxRuntime.Installed linuxRuntime;
     private final EnvVars envVars = new EnvVars();
     private boolean firstTimeBoot = false;
     private SharedPreferences preferences;
@@ -435,10 +441,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
 
-        if (container.isLinux()) {
-            Toast.makeText(this, "Launching Linux containers is not available yet", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
+        linuxSession = container.isLinux();
+        if (linuxSession) {
+            linuxRuntime = LinuxRuntime.resolve(this, container);
+            if (linuxRuntime == null) {
+                Toast.makeText(this, "This container's Linux runtime is not installed. Download it in Components.",
+                        Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
         }
 
         containerManager.activateContainer(container);
@@ -473,10 +484,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         firstTimeBoot = container.getExtra("imgVersion").isEmpty();
 
-        String wineVersion = container.getWineVersion();
-        wineInfo = WineInfo.fromIdentifier(this, contentsManager, wineVersion);
+        if (!linuxSession) {
+            String wineVersion = container.getWineVersion();
+            wineInfo = WineInfo.fromIdentifier(this, contentsManager, wineVersion);
 
-        imageFs.setWinePath(wineInfo.path);
+            imageFs.setWinePath(wineInfo.path);
+        }
 
         ProcessHelper.removeAllDebugCallbacks();
         if (enableLogs || enableWinlatorLogs) LogView.setFilename(getExecutable());
@@ -540,7 +553,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
         this.dxwrapperConfig = DXVKConfigDialog.parseConfig(dxwrapperConfig);
 
-        if (!wineInfo.isWin64()) {
+        if (!linuxSession && !wineInfo.isWin64()) {
             onExtractFileListener = (file, size) -> {
                 String path = file.getPath();
                 if (path.contains("system32/"))
@@ -684,6 +697,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 simulateConfirmInputControlsDialog();
             }
             Executors.newSingleThreadExecutor().execute(() -> {
+                if (linuxSession) {
+                    setupLinuxEnvironment();
+                    return;
+                }
                 setupWineSystemFiles();
                 extractGraphicsDriverFiles();
                 changeWineAudioDriver();
@@ -814,7 +831,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         startTime = System.currentTimeMillis();
         handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
-        if (!isInPictureInPictureMode())
+        if (!isInPictureInPictureMode() && !linuxSession)
             ProcessHelper.resumeAllWineProcesses();
     }
 
@@ -829,7 +846,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 xServerView.onPause();
             }
 
-            ProcessHelper.pauseAllWineProcesses();
+            if (!linuxSession) ProcessHelper.pauseAllWineProcesses();
         }
 
         savePlaytimeData();
@@ -921,10 +938,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         Executors.newSingleThreadExecutor().execute(() -> {
 
-            ProcessHelper.terminateAllWineProcesses();
+            if (linuxSession) {
+                // The app restarts below; the session's processes must be gone before that happens.
+                LinuxProgramLauncherComponent linuxLauncher = environment != null
+                        ? environment.getComponent(LinuxProgramLauncherComponent.class) : null;
+                if (linuxLauncher != null) linuxLauncher.awaitTeardown();
+            }
+            else ProcessHelper.terminateAllWineProcesses();
 
             long start = System.currentTimeMillis();
-            while (!ProcessHelper.listRunningWineProcesses().isEmpty()) {
+            while (!linuxSession && !ProcessHelper.listRunningWineProcesses().isEmpty()) {
                 long elapsed = System.currentTimeMillis() - start;
                 if (elapsed >= 1500) {
 
@@ -1208,6 +1231,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     }
 
+    /** Starts the X server, audio and the Linux program (the desktop, or the shortcut's program) under proot. */
+    private void setupLinuxEnvironment() {
+        String rootPath = imageFs.getRootDir().getPath();
+        FileUtils.clear(imageFs.getTmpDir());
+
+        environment = new XEnvironment(this, imageFs);
+        environment.addComponent(
+                new SysVSharedMemoryComponent(
+                        xServer,
+                        UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
+        environment.addComponent(
+                new XServerComponent(
+                        xServer,
+                        UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));
+        environment.addComponent(
+                new PulseAudioComponent(
+                        UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
+
+        String[] command = shortcut != null && !shortcut.path.isEmpty()
+                ? LinuxSession.programCommand(shortcut.path)
+                : LinuxSession.desktopCommand();
+        LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
+        launcher.setTerminationCallback((status) -> runOnUiThread(this::exit));
+        environment.addComponent(launcher);
+
+        environment.startEnvironmentComponents();
+    }
+
     private void createWrapperScript(String path, String content) {
         File scriptFile = new File(path);
         FileUtils.writeString(scriptFile, content);
@@ -1229,8 +1280,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         boolean useDisplayX = isDisplayXEnabled();
 
-        boolean useEGL = !useDisplayX && (shortcut != null ? shortcut.getRendererNative()
-                : (container != null && container.getRendererNative()));
+        // The Vulkan renderer loads a bionic driver prepared for Wine containers, so Linux sessions use EGL.
+        boolean useEGL = !useDisplayX && (linuxSession || (shortcut != null ? shortcut.getRendererNative()
+                : (container != null && container.getRendererNative())));
 
         if (useDisplayX || useEGL) {
             xServerView = new XServerView(this, xServer);
@@ -1281,7 +1333,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     : (container != null ? container.getRendererFilterMode() : 0));
         }
 
-        if (shortcut != null) {
+        if (shortcut != null && !linuxSession) {
             renderer.setUnviewableWMClasses("explorer.exe");
         }
 

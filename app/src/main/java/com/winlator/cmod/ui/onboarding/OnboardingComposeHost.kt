@@ -55,6 +55,8 @@ interface OnboardingCallbacks {
     fun onRemoveBundledRuntime()
     fun onBrowseLocal()
     fun onBrowseDriver()
+    /** Pick a zip with a Linux (glibc) Vulkan driver for Linux containers. */
+    fun onBrowseLinuxDriver()
     fun onRuntimeSelected(runtimeIdentifier: String)
     /** The user chose to skip installing Wine/Proton and creating the first container. */
     fun onSkipSetup()

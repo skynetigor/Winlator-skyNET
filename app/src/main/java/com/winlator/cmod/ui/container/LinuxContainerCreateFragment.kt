@@ -7,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,15 +17,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -34,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,10 +42,18 @@ import androidx.fragment.app.Fragment
 import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.linux.LinuxDriverManager
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
 import com.winlator.cmod.linux.LinuxRuntimeInstaller
+import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.ui.settings.CpuSelectorRow
+import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
+import com.winlator.cmod.ui.settings.SettingMappedChoice
+import com.winlator.cmod.ui.settings.SettingToggle
+import com.winlator.cmod.ui.settings.SettingsCard
+import com.winlator.cmod.ui.settings.SettingsDivider
 import com.winlator.cmod.ui.theme.WinZTheme
 import org.json.JSONObject
 import java.util.Locale
@@ -127,6 +131,18 @@ private class RuntimeInstallUi {
 }
 
 private val SIZE_PATTERN = Regex("^\\d{3,5}x\\d{3,5}$")
+private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
+private val HUD_LABELS = listOf("Off", "Classic", "Modern")
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
 
 @Composable
 private fun LinuxContainerEditor(
@@ -139,11 +155,31 @@ private fun LinuxContainerEditor(
     val context = LocalContext.current
     val manager = remember { ContainerManager(context) }
     val editing = remember { editId?.let { manager.getContainerById(it) } }
+    val cores = remember { Runtime.getRuntime().availableProcessors().coerceIn(1, 32) }
 
     var name by remember { mutableStateOf(editing?.name ?: "Linux") }
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
-    var menuOpen by remember { mutableStateOf(false) }
+    var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
+    var softwareOutput by remember {
+        mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) != "native")
+    }
+    val cpuSelected = remember {
+        mutableStateListOf<Boolean>().apply {
+            val saved = editing?.getCPUList()?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.toSet()
+            for (i in 0 until cores) add(saved == null || saved.isEmpty() || i in saved)
+        }
+    }
+    var fpsIndex by remember { mutableStateOf(editing?.getExtra("graphicsFpsPreset")?.toIntOrNull()?.coerceIn(0, 4) ?: 0) }
+    var hudMode by remember {
+        mutableStateOf(
+            editing?.getExtra("hudMode")?.toIntOrNull()?.coerceIn(0, 2) ?: if (editing?.isShowFPS == true) 1 else 0
+        )
+    }
+    var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: false) }
+    var envVars by remember {
+        mutableStateOf(editing?.envVars?.takeIf { it != Container.DEFAULT_ENV_VARS } ?: "")
+    }
     var creating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -153,6 +189,7 @@ private fun LinuxContainerEditor(
     var offered by remember { mutableStateOf<LinuxRuntimeCatalog.Entry?>(null) }
 
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
+    val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
     // Until the user picks one, the first installed runtime is used.
     val selected = runtimes.firstOrNull { it.id == chosenRuntimeId } ?: runtimes.firstOrNull()
     val sizeValid = SIZE_PATTERN.matches(screenSize.trim())
@@ -173,12 +210,26 @@ private fun LinuxContainerEditor(
         }
     }
 
+    /** Writes everything the editor shows into the container (the caller saves it). */
+    fun apply(container: Container) {
+        container.setName(name.trim())
+        container.setScreenSize(screenSize.trim())
+        if (selected != null) container.setLinuxRuntime(selected.id)
+        container.setEnvVars(envVars.trim())
+        container.setCPUList(
+            if (cpuSelected.all { it }) null
+            else cpuSelected.indices.filter { cpuSelected[it] }.joinToString(",")
+        )
+        container.setFullscreenStretched(stretched)
+        container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
+        container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
+        container.putExtra("graphicsFpsPreset", fpsIndex.toString())
+        container.putExtra("hudMode", hudMode.toString())
+    }
+
     fun save() {
-        val size = screenSize.trim()
         if (editing != null) {
-            editing.setName(name.trim())
-            editing.setScreenSize(size)
-            if (selected != null) editing.setLinuxRuntime(selected.id)
+            apply(editing)
             editing.saveData()
             onDone()
             return
@@ -207,12 +258,17 @@ private fun LinuxContainerEditor(
         creating = true
         val data = JSONObject().apply {
             put("name", name.trim())
-            put("screenSize", size)
-            put("linuxRuntime", selected?.id ?: "")
+            put("screenSize", screenSize.trim())
+            put("linuxRuntime", selected.id)
+            put("envVars", "")
         }
         manager.createLinuxContainerAsync(data) { created ->
             creating = false
-            if (created != null) onDone() else error = "Could not create the container"
+            if (created != null) {
+                apply(created)
+                created.saveData()
+                onDone()
+            } else error = "Could not create the container"
         }
     }
 
@@ -233,8 +289,9 @@ private fun LinuxContainerEditor(
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            SectionTitle("General")
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -252,26 +309,24 @@ private fun LinuxContainerEditor(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Surface(
-                shape = MaterialTheme.shapes.large,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Linux runtime", style = MaterialTheme.typography.titleSmall)
-                    if (install.running) {
+            SectionTitle("Runtime and graphics")
+            SettingsCard {
+                if (install.running) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         val label = when (install.phase) {
                             LinuxRuntimeInstaller.Phase.DOWNLOAD -> "Downloading"
                             LinuxRuntimeInstaller.Phase.VERIFY -> "Verifying"
                             LinuxRuntimeInstaller.Phase.EXTRACT -> "Unpacking"
                         }
-                        Text("$label… ${install.percent}%")
+                        Text("Linux runtime: $label… ${install.percent}%")
                         LinearProgressIndicator(
                             progress = { install.percent / 100f },
                             modifier = Modifier.fillMaxWidth()
                         )
                         TextButton(onClick = { LinuxRuntimeInstallTask.cancel() }) { Text("Cancel") }
-                    } else if (selected == null) {
+                    }
+                } else if (selected == null) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (editing == null) {
                             val size = offered?.size?.takeIf { it > 0 }?.let { formatMegabytes(it) } ?: "about 790 MB"
                             Text(
@@ -289,26 +344,58 @@ private fun LinuxContainerEditor(
                         } else {
                             Text("This container's runtime is not installed. Download it in Components.")
                         }
-                    } else {
-                        Box {
-                            OutlinedButton(onClick = { menuOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text(selected.name)
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                runtimes.forEach { runtime ->
-                                    DropdownMenuItem(
-                                        text = { Text(runtime.name) },
-                                        onClick = {
-                                            chosenRuntimeId = runtime.id
-                                            menuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
                     }
+                } else {
+                    SettingMappedChoice(
+                        "Runtime",
+                        selected.id,
+                        runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
+                    ) { chosenRuntimeId = it }
                 }
+                SettingsDivider()
+                val driverEntries = LinkedHashMap<String, String>().apply {
+                    put("", "Runtime default")
+                    drivers.forEach { put(it.id, it.label()) }
+                    // A driver that was removed after being chosen stays visible until another is picked.
+                    if (driverId.isNotEmpty() && driverId !in this) put(driverId, "$driverId (not installed)")
+                }
+                SettingMappedChoice("Turnip driver", driverId, driverEntries) { driverId = it }
+                if (drivers.isEmpty()) {
+                    Text(
+                        "Import a Linux Turnip zip in Components → Linux Driver to choose another version.",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                SettingsDivider()
+                SettingToggle("Software Vulkan output (CPU copy)", softwareOutput) { softwareOutput = it }
             }
+
+            SectionTitle("Performance")
+            SettingsCard {
+                CpuSelectorRow("CPU cores", cpuSelected) { index, checked ->
+                    // At least one core must stay selected.
+                    if (checked || cpuSelected.count { it } > 1) cpuSelected[index] = checked
+                }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "FPS limit",
+                    fpsIndex.toString(),
+                    FPS_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
+                ) { fpsIndex = it.toInt() }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "HUD",
+                    hudMode.toString(),
+                    HUD_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
+                ) { hudMode = it.toInt() }
+                SettingsDivider()
+                SettingToggle("Fullscreen stretched", stretched) { stretched = it }
+            }
+
+            SectionTitle("Environment variables")
+            EnvironmentVariablesEditor(value = envVars, onChanged = { envVars = it })
 
             (error ?: install.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (!GPUInformation.isAdrenoGPU(context)) {
@@ -318,11 +405,6 @@ private fun LinuxContainerEditor(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Text(
-                "Launching Linux containers is not available yet.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall
-            )
 
             Button(onClick = ::save, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
                 Text(if (editing != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")

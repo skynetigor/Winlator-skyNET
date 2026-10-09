@@ -33,6 +33,7 @@ import com.winlator.cmod.core.OpenGLDriverDefaults;
 import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
+import com.winlator.cmod.linux.LinuxDriverManager;
 import com.winlator.cmod.linux.LinuxRuntime;
 import com.winlator.cmod.linux.LinuxRuntimeCatalog;
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask;
@@ -85,6 +86,8 @@ public class OnboardingActivity extends AppCompatActivity {
     private static final int REQUEST_LOCAL_COMPONENT = 822;
     private static final int REQUEST_ALL_FILES = 823;
     private static final int REQUEST_LOCAL_DRIVER = 824;
+    private static final int REQUEST_LOCAL_LINUX_DRIVER = 825;
+    private static final String LINUX_DRIVER_PREFIX = "linux-driver:";
 
     private final OkHttpClient http = new OkHttpClient();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -177,6 +180,14 @@ public class OnboardingActivity extends AppCompatActivity {
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
                         intent.setType("*/*");
                         startActivityForResult(intent, REQUEST_LOCAL_DRIVER);
+                    }
+
+                    @Override
+                    public void onBrowseLinuxDriver() {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        startActivityForResult(intent, REQUEST_LOCAL_LINUX_DRIVER);
                     }
 
                     @Override
@@ -519,6 +530,12 @@ public class OnboardingActivity extends AppCompatActivity {
                     null, false, true
             ));
         }
+        for (LinuxDriverManager.Installed driver : LinuxDriverManager.list(this)) {
+            ui.add(new OnboardingComponent(
+                    LINUX_DRIVER_PREFIX + driver.id, "Linux Driver", driver.label(), true, false, true,
+                    null, LinuxDriverManager.containerUsing(this, driver.id) != null, false
+            ));
+        }
         composeController.setComponents(ui);
         refreshBundledRuntimeState();
     }
@@ -786,7 +803,42 @@ public class OnboardingActivity extends AppCompatActivity {
                 .show();
     }
 
+    private void requestRemoveLinuxDriver(String componentId) {
+        String id = componentId.substring(LINUX_DRIVER_PREFIX.length());
+        String using = LinuxDriverManager.containerUsing(this, id);
+        if (using != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Driver is in use")
+                    .setMessage("This Linux driver cannot be deleted because it is used by " + using + ".")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Linux driver?")
+                .setMessage("The driver files will be removed.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Delete", (d, w) -> {
+                    if (installBusy) return;
+                    installBusy = true;
+                    composeController.setInstallBusy(componentId, true);
+                    io.execute(() -> {
+                        LinuxDriverManager.remove(this, id);
+                        runOnUiThread(() -> {
+                            installBusy = false;
+                            composeController.setInstallBusy(null, false);
+                            syncComposeCatalog();
+                        });
+                    });
+                })
+                .show();
+    }
+
     private void requestRemoveComponent(String componentId) {
+        if (componentId.startsWith(LINUX_DRIVER_PREFIX)) {
+            requestRemoveLinuxDriver(componentId);
+            return;
+        }
         if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) {
             requestRemoveLinuxRuntime(componentId);
             return;
@@ -980,6 +1032,22 @@ public class OnboardingActivity extends AppCompatActivity {
                     if (installed == null || installed.isEmpty()) {
                         Toast.makeText(this, "Unable to install the driver.", Toast.LENGTH_LONG).show();
                     }
+                });
+            });
+        } else if (requestCode == REQUEST_LOCAL_LINUX_DRIVER && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+            if (installBusy) return;
+            installBusy = true;
+            composeController.setInstallBusy("linux-driver-local", true);
+            Uri uri = data.getData();
+            String displayName = localDisplayName(uri);
+            composeController.updateInstallProgress("Installing " + displayName, -1);
+            io.execute(() -> {
+                LinuxDriverManager.Result result = LinuxDriverManager.install(this, uri, displayName);
+                runOnUiThread(() -> {
+                    installBusy = false;
+                    composeController.setInstallBusy(null, false);
+                    syncComposeCatalog();
+                    if (result.error != null) Toast.makeText(this, result.error, Toast.LENGTH_LONG).show();
                 });
             });
         } else if (requestCode == REQUEST_ALL_FILES) {

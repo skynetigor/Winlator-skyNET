@@ -24,6 +24,17 @@ public abstract class ProcessHelper {
     private static final byte SIGTERM = 15;
     private static final byte SIGKILL = 9;
 
+    static {
+        System.loadLibrary("winlator");
+    }
+
+    private static native int nativeSetProcessAffinity(int pid, int mask);
+
+    /** Pins a process to the cores in {@code mask} (bit i = CPU i). Returns 0 on success or an errno. */
+    public static int setProcessAffinity(int pid, int mask) {
+        return nativeSetProcessAffinity(pid, mask);
+    }
+
     public static void suspendProcess(int pid) {
         Process.sendSignal(pid, SIGSTOP);
         Log.d("ProcessHelper", "Process suspended with pid: " + pid);
@@ -81,6 +92,13 @@ public abstract class ProcessHelper {
     }
 
     public static int exec(String command, String[] envp, File workingDir, Callback<Integer> terminationCallback) {
+        Log.d("ProcessHelper", "Splitting command: " + command);
+        return exec(splitCommand(command), envp, workingDir, terminationCallback);
+    }
+
+    /** Runs an already split command, for callers whose arguments contain spaces or quotes. */
+    public static int exec(String[] splitCommand, String[] envp, File workingDir, Callback<Integer> terminationCallback) {
+        String command = Arrays.toString(splitCommand);
         Log.d("ProcessHelper", "env: " + Arrays.toString(envp) + "\ncmd: " + command);
 
         // Store env vars for future use
@@ -88,9 +106,6 @@ public abstract class ProcessHelper {
 
         int pid = -1;
         try {
-            Log.d("ProcessHelper", "Splitting command: " + command);
-            String[] splitCommand = splitCommand(command);
-            Log.d("ProcessHelper", "Split command result: " + Arrays.toString(splitCommand));
             Log.d("ProcessHelper", "Starting process...");
             ProcessBuilder pb = new ProcessBuilder(splitCommand);
             pb.directory(workingDir);
