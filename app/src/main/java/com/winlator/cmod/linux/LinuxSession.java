@@ -38,6 +38,8 @@ public final class LinuxSession {
     private static final String TAG = "LinuxSession";
     /** Container extra: "sw" (default) draws Vulkan frames with a CPU copy, "native" leaves the driver's own presentation. */
     public static final String EXTRA_VULKAN_PRESENT = "linuxVulkanPresent";
+    /** Container extra: "software" (default, llvmpipe) or "zink" (OpenGL on the Turnip Vulkan driver). */
+    public static final String EXTRA_GL_DRIVER = "linuxGlDriver";
     private static final String HOST_DIR = "opt/android-host";
     private static final String PRELOAD = "/usr/local/lib/libblsession.so";
     private static final String FAKE_PROC_DIR = "etc/bannerlator/proc";
@@ -47,11 +49,6 @@ public final class LinuxSession {
     };
 
     private LinuxSession() {}
-
-    /** The program the session starts: the container's desktop (a file manager). */
-    public static String[] desktopCommand() {
-        return new String[]{"pcmanfm"};
-    }
 
     /** A program started from a shortcut: scripts through bash, anything else executed from its own directory. */
     public static String[] programCommand(String path) {
@@ -148,8 +145,14 @@ public final class LinuxSession {
         // MIT-SHM needs the app's bionic SysV shim; a glibc client sends images through the socket instead.
         env.put("QT_X11_NO_MITSHM", "1");
         env.put("_X11_NO_MITSHM", "1");
-        env.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
-        env.put("GALLIUM_DRIVER", "zink");
+        if ("zink".equals(container.getExtra(EXTRA_GL_DRIVER))) {
+            env.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
+            env.put("GALLIUM_DRIVER", "zink");
+        }
+        else {
+            env.put("LIBGL_ALWAYS_SOFTWARE", "1");
+            env.put("GALLIUM_DRIVER", "llvmpipe");
+        }
         env.put("PULSE_SERVER", "unix:" + new File(imageFsRoot, UnixSocketConfig.PULSE_SERVER_PATH).getPath());
 
         // Turnip: an imported Linux driver, or the one the runtime ships.

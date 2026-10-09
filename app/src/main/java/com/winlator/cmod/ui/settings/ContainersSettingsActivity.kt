@@ -88,6 +88,7 @@ import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
 import com.winlator.cmod.ui.container.GameContainerFragment
 import com.winlator.cmod.ui.container.LinuxContainerCreateFragment
+import com.winlator.cmod.ui.container.LinuxProgramsFragment
 import com.winlator.cmod.ui.theme.WinZTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -210,6 +211,11 @@ class ContainersSettingsActivity : AppCompatActivity() {
     }
 
     private fun runContainer(id: Int) {
+        if (ContainerManager(this).getContainerById(id)?.isLinux == true) {
+            // A Linux container starts one of its programs, so ▶ opens the program list.
+            openFragment(LinuxProgramsFragment.forContainer(id))
+            return
+        }
         if (!XrActivity.isEnabled(this)) {
             startActivity(Intent(this, XServerDisplayActivity::class.java).putExtra("container_id", id))
         } else {

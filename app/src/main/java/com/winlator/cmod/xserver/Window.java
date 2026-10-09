@@ -190,6 +190,15 @@ public class Window extends XResource {
         return attributes.isMapped() && windowGroup == id && width > 1 && height > 1;
     }
 
+    /**
+     * A mapped window directly under the root: what a native X11 program shows as its main window.
+     * Wine marks its main window with a WM_HINTS group instead ({@link #isApplicationWindow()}).
+     */
+    public boolean isMappedTopLevel() {
+        return attributes.isMapped() && parent != null && parent.parent == null && isInputOutput()
+                && width > 1 && height > 1;
+    }
+
     public boolean isInputOutput() {
         return content != null;
     }

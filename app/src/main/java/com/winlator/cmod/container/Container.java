@@ -439,6 +439,8 @@ public class Container {
     }
 
     public File getDesktopDir() {
+        // A Linux container keeps its program shortcuts in its home, where the guest sees them as /root/Desktop.
+        if (isLinux()) return new File(getLinuxHomeDir(), "Desktop");
         return new File(rootDir, ".wine/drive_c/users/"+ImageFs.USER+"/Desktop/");
     }
 

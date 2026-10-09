@@ -114,8 +114,9 @@ class JNICache {
         }
         
         void detachEnv(JNIEnv *env) {
+            // The JNIEnv belongs to the VM and is released by DetachCurrentThread; deleting it again
+            // aborted the app (scudo: invalid chunk state) whenever a renderer thread stopped.
             vm->DetachCurrentThread();
-            delete env;
         }
         
         void init (JavaVM *vm, JNIEnv *env) {

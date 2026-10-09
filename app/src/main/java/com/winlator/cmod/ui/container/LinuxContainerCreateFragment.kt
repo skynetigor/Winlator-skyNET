@@ -161,6 +161,9 @@ private fun LinuxContainerEditor(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
+    var glDriver by remember {
+        mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
+    }
     var softwareOutput by remember {
         mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) != "native")
     }
@@ -223,6 +226,7 @@ private fun LinuxContainerEditor(
         container.setFullscreenStretched(stretched)
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
+        container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
     }
@@ -368,6 +372,12 @@ private fun LinuxContainerEditor(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                SettingsDivider()
+                SettingMappedChoice(
+                    "OpenGL driver",
+                    glDriver,
+                    linkedMapOf("software" to "Software (llvmpipe)", "zink" to "Zink on Turnip")
+                ) { glDriver = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy)", softwareOutput) { softwareOutput = it }
             }

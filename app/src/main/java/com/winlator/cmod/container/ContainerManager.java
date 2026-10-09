@@ -161,6 +161,7 @@ public class ContainerManager {
                 FileUtils.delete(containerDir);
                 return null;
             }
+            addLinuxTestPrograms(container);
 
             container.saveData();
             maxContainerId = Math.max(maxContainerId, id);
@@ -170,6 +171,22 @@ public class ContainerManager {
             e.printStackTrace();
         }
         return null;
+    }
+
+    /** Programs that ship with the runtime, so a new Linux container has something to start. */
+    private void addLinuxTestPrograms(Container container) {
+        addLinuxShortcut(container, "glxgears", "/usr/bin/glxgears");
+        addLinuxShortcut(container, "vkcube", "/usr/bin/vkcube");
+    }
+
+    /** Writes a shortcut for a program at {@code path} (as the guest sees it) into the container's Desktop. */
+    public static File addLinuxShortcut(Container container, String name, String path) {
+        File dir = container.getDesktopDir();
+        dir.mkdirs();
+        File file = new File(dir, name.replace('/', '_') + ".desktop");
+        FileUtils.writeString(file,
+                "[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
+        return file;
     }
 
     public void duplicateContainerAsync(Container container, Runnable callback) {

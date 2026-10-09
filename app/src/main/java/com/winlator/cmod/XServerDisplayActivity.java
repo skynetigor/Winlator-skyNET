@@ -77,6 +77,9 @@ import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
 import com.winlator.cmod.linux.LinuxRuntime;
+import com.winlator.cmod.xserver.extensions.DRI3Extension;
+import com.winlator.cmod.xserver.extensions.MITSHMExtension;
+import com.winlator.cmod.xserver.extensions.PresentExtension;
 import com.winlator.cmod.linux.LinuxSession;
 import com.winlator.cmod.xenvironment.components.LinuxProgramLauncherComponent;
 import com.winlator.cmod.core.StringUtils;
@@ -444,6 +447,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         linuxSession = container.isLinux();
         if (linuxSession) {
             linuxRuntime = LinuxRuntime.resolve(this, container);
+            if (shortcutPath == null || shortcutPath.isEmpty()) {
+                Toast.makeText(this, "Choose a program to start in this container.", Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
             if (linuxRuntime == null) {
                 Toast.makeText(this, "This container's Linux runtime is not installed. Download it in Components.",
                         Toast.LENGTH_LONG).show();
@@ -589,6 +597,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         displayxConfig.put("precisePresentation", precisePresentation ? "1" : "0");
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
         xServer.setWinHandler(winHandler);
+        if (linuxSession) {
+            // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3/Present only
+            // take the Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket.
+            xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
+            xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
+            xServer.extensions.remove(PresentExtension.MAJOR_OPCODE);
+        }
         xServer.setRelativeMouseMovement(isRelativeMouseMovement);
         advertisePanelRefreshRates();
 
@@ -597,7 +612,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             @Override
             public void onUpdateWindowContent(Window window) {
-                if (!winStarted[0] && window.isApplicationWindow()) {
+                if (!winStarted[0] && isSessionApplicationWindow(window)) {
                     if (!simulateTouchScreen) {
                         xServerView.setCursorVisible(true);
                     }
@@ -609,7 +624,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
                 } else if (frameRatingWindowId == -1 && lastRendererName != null
-                        && window.isApplicationWindow()
+                        && isSessionApplicationWindow(window)
                         && ((modernHud != null && modernHud.isUserEnabled())
                          || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {
 
@@ -718,6 +733,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             configChangedCallback = runnable;
         } else
             runnable.run();
+    }
+
+    /** The window that means the program has started: Wine's marked main window, or a native program's top-level window. */
+    private boolean isSessionApplicationWindow(Window window) {
+        return linuxSession ? window.isMappedTopLevel() : window.isApplicationWindow();
     }
 
     private int parseContainerIdFromDesktopFile(File desktopFile) {
@@ -1249,9 +1269,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = shortcut != null && !shortcut.path.isEmpty()
-                ? LinuxSession.programCommand(shortcut.path)
-                : LinuxSession.desktopCommand();
+        String[] command = LinuxSession.programCommand(shortcut.path);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         launcher.setTerminationCallback((status) -> runOnUiThread(this::exit));
         environment.addComponent(launcher);
