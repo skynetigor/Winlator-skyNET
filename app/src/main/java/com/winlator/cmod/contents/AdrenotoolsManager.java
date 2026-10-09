@@ -215,9 +215,25 @@ public class AdrenotoolsManager {
         return hasExtracted;
     }
     
+    /**
+     * Some driver packages bundle several platforms (android/, linux/, ...) with a meta.json inside
+     * each folder and none at the root. When the root has no meta.json but android/ does, the
+     * contents of android/ become the driver.
+     */
+    private void promoteBundledAndroidDriver(File tmpDir) {
+        if (new File(tmpDir, "meta.json").exists()) return;
+        File android = new File(tmpDir, "android");
+        if (!new File(android, "meta.json").exists()) return;
+        File promoted = new File(adrenotoolsContentDir, "tmp_android");
+        if (promoted.exists()) FileUtils.delete(promoted);
+        if (!android.renameTo(promoted)) return;
+        FileUtils.delete(tmpDir);
+        promoted.renameTo(tmpDir);
+    }
+
     public String installDriver(Uri driverUri) {
         File tmpDir = new File(adrenotoolsContentDir, "tmp");
-        if (tmpDir.exists()) tmpDir.delete();
+        if (tmpDir.exists()) FileUtils.delete(tmpDir);
         tmpDir.mkdirs();
         ZipInputStream zis;
         InputStream is;
@@ -226,13 +242,24 @@ public class AdrenotoolsManager {
         try {
             is = mContext.getContentResolver().openInputStream(driverUri);
             zis = new ZipInputStream(is);
+            String tmpRoot = tmpDir.getCanonicalPath() + File.separator;
             ZipEntry entry = zis.getNextEntry();
             while (entry != null) {
                 File dstFile = new File(tmpDir, entry.getName());
-                Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                // Entries may sit in subfolders (bundle zips); never write outside the temp folder.
+                if (!dstFile.getCanonicalPath().startsWith(tmpRoot)) throw new IOException("Unsafe zip entry: " + entry.getName());
+                if (entry.isDirectory()) {
+                    dstFile.mkdirs();
+                }
+                else {
+                    File parent = dstFile.getParentFile();
+                    if (parent != null) parent.mkdirs();
+                    Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
                 entry = zis.getNextEntry();
             }
             zis.close();
+            promoteBundledAndroidDriver(tmpDir);
             if (new File(tmpDir, "meta.json").exists()) {
                 name = getDriverName(tmpDir.getName());
                 File dst = new File(adrenotoolsContentDir, name);
