@@ -44,6 +44,16 @@ release existing is not enough.
 `gh api repos/<owner>/<repo>/releases --jq '.[0:5][]|[.tag_name,.published_at[0:10],([.assets[].name]|join(", "))]|@tsv'`
 lists recent releases. Do not copy a driver or component from a source you could not open and check.
 
+### Stock Linux Wine does not run here
+
+Tested with `proton-cachyos` x86_64 repacked as a Winlator Proton: the container is created, but launching fails at once with
+`Error: Global Symbol __libc_start_main not found, cannot apply R_X86_64_GLOB_DAT ... in .../bin/wine` followed by SIGABRT
+(Box64's wrapped libc has no glibc `__libc_start_main`). Android-ready Wine/Proton links against bionic (`libc.so`, `libdl.so`,
+interpreter `/system/bin/linker64`, as in GameNative's packages); stock builds link `libc.so.6` and `ld-linux-x86-64.so.2`.
+Check a candidate with `llvm-readelf -d lib/wine/x86_64-unix/ntdll.so | grep NEEDED` before repacking: `libc.so.6` means it needs a
+rebuild for Android, not a repack. The plain `arm64` variants (Wine ARM64 + FEX wow64) are not an `arm64ec` runtime and the
+app's identifier pattern (`WineInfo`) knows no such architecture.
+
 ### What the app accepts
 
 - **`.wcp`** = tar compressed with **xz** (or zstd; the app tries xz first). It contains `profile.json` plus the files.
@@ -66,7 +76,9 @@ lists recent releases. Do not copy a driver or component from a source you could
 Flat objects: `id` (stable, never changes), `name` (free text), `type`, `verName`, `verCode`, `remoteUrl`; drivers also
 `source`. The **Components screen shows `verName`, not `name`**, so put any prefix the user wants (e.g. `exp`) in `verName`
 (and keep `versionName` in `profile.json` equal to it). ARM64EC builds must have `arm64ec` in `verName` (the app filters
-on it); a plain `arm64` build is not ARM64EC. Ids: `<type>-<verName>` lowercased, e.g. `fexcore-2610`,
+on it); a plain `arm64` build is not ARM64EC. Wine/Proton `verName` must fit `[label-]<version>[-<build>][-label]-<arch>` with arch `x86_64`, `x86` or `arm64ec` (for example
+`exp-cachyos-11.0-20261005-slr-x86_64`); anything else makes the app fall back to the bundled runtime and container creation fails.
+Ids: `<type>-<verName>` lowercased, e.g. `fexcore-2610`,
 `renderer-driver-whitebelyash-tu-v32-mainline-turnip-v32`. Insert new `RendererDriver` entries after the last one.
 
 ## 3. Compile it ourselves (only when nothing usable exists)

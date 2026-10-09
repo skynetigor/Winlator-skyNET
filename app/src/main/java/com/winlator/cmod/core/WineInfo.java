@@ -18,10 +18,14 @@ import java.util.regex.Pattern;
 
 public class WineInfo implements Parcelable {
     public static final WineInfo MAIN_WINE_VERSION = new WineInfo("proton", "9.0", "arm64ec");
-    private static final Pattern pattern = Pattern.compile("^(wine|proton)\\-([0-9\\.]+)\\-?([0-9\\.]+)?\\-(x86|x86_64|arm64ec)$");
+    // type, optional label prefix ("exp-cachyos-"), version, optional build number, optional label suffix ("-slr"), arch
+    private static final Pattern pattern = Pattern.compile("^(wine|proton)\\-((?:[a-z][a-z0-9]*\\-)*)([0-9\\.]+)\\-?([0-9\\.]+)?((?:\\-[a-z][a-z0-9]*)*)\\-(x86|x86_64|arm64ec)$");
     public final String version;
     public final String type;
     public String subversion;
+    /** Label words before / after the version, e.g. "exp-cachyos-" and "-slr"; empty for plain names. */
+    private String labelPrefix = "";
+    private String labelSuffix = "";
     public final String path;
     private String arch;
 
@@ -54,6 +58,14 @@ public class WineInfo implements Parcelable {
         subversion = in.readString();
         arch = in.readString();
         path = in.readString();
+        labelPrefix = in.readString();
+        labelSuffix = in.readString();
+    }
+
+    private WineInfo withLabels(String prefix, String suffix) {
+        this.labelPrefix = prefix != null ? prefix : "";
+        this.labelSuffix = suffix != null ? suffix : "";
+        return this;
     }
 
     public String getArch() {
@@ -78,7 +90,7 @@ public class WineInfo implements Parcelable {
     }
 
     public String fullVersion() {
-        return version+(subversion != null ? "-"+subversion : "");
+        return labelPrefix + version + (subversion != null ? "-" + subversion : "") + labelSuffix;
     }
 
     @NonNull
@@ -112,6 +124,8 @@ public class WineInfo implements Parcelable {
         dest.writeString(subversion);
         dest.writeString(arch);
         dest.writeString(path);
+        dest.writeString(labelPrefix);
+        dest.writeString(labelSuffix);
     }
 
     @NonNull
@@ -144,7 +158,8 @@ public class WineInfo implements Parcelable {
             if (wineProfile != null && (wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_WINE || wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_PROTON))
                 path = contentsManager.getInstallDir(context, wineProfile).getPath();
 
-            return new WineInfo(matcher.group(1), matcher.group(2), matcher.group(3), matcher.group(4), path);
+            return new WineInfo(matcher.group(1), matcher.group(3), matcher.group(4), matcher.group(6), path)
+                    .withLabels(matcher.group(2), matcher.group(5));
         }
         else return new WineInfo(MAIN_WINE_VERSION.type, MAIN_WINE_VERSION.version, MAIN_WINE_VERSION.arch, imageFs.getRootDir().getPath() + "/opt/" + MAIN_WINE_VERSION.identifier());
     }
