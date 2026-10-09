@@ -56,6 +56,8 @@ public class ContentProfile {
     /** Stable registry id and free-form display name; only set for entries from the remote registry. */
     public String id;
     public String name;
+    /** Optional registry badge: "stable" or "prerelease"; null when the registry does not say. */
+    public String channel;
     public String verName;
     public int verCode;
     public String desc;

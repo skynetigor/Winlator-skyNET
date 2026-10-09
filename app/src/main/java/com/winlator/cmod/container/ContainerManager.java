@@ -290,13 +290,20 @@ public class ContainerManager {
 
     public boolean extractContainerPatternFile(Container container, String wineVersion, ContentsManager contentsManager, File containerDir, OnExtractFileListener onExtractFileListener) {
         WineInfo wineInfo = WineInfo.fromIdentifier(context, contentsManager, wineVersion);
-        if (wineInfo.path == null || wineInfo.path.isEmpty()) return false;
+        if (wineInfo.path == null || wineInfo.path.isEmpty()) {
+            Log.e("ContainerManager", "No installed Wine/Proton found for \"" + wineVersion + "\" (parsed as " + wineInfo.identifier() + ")");
+            return false;
+        }
+        Log.i("ContainerManager", "Creating prefix from " + wineInfo.path + " (wineVersion=" + wineVersion + ", arch=" + wineInfo.getArch() + ")");
         String containerPattern = wineVersion + "_container_pattern.tzst";
         boolean result = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context, containerPattern, containerDir, onExtractFileListener);
 
         if (!result) {
             File containerPatternFile = new File(wineInfo.path + "/prefixPack.txz");
+            Log.i("ContainerManager", "Extracting " + containerPatternFile + " (exists=" + containerPatternFile.isFile()
+                    + ", size=" + containerPatternFile.length() + ")");
             result = TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, containerPatternFile, containerDir);
+            if (!result) Log.e("ContainerManager", "Could not extract the prefix pack " + containerPatternFile);
         }
 
         if (result) {
@@ -309,6 +316,7 @@ public class ContainerManager {
                 extractCommonDlls(wineInfo, "i386-windows", "syswow64", containerDir, onExtractFileListener);
             }
             catch (JSONException e) {
+                Log.e("ContainerManager", "Preparing the Wine DLLs failed: " + e.getMessage());
                 return false;
             }
         }

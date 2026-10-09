@@ -104,6 +104,13 @@ public class ContentsManager {
         void onProgress(int progress);
     }
 
+    /** @return "stable", "prerelease" or null for anything else */
+    public static String normalizeChannel(String value) {
+        if ("stable".equalsIgnoreCase(value)) return "stable";
+        if ("prerelease".equalsIgnoreCase(value)) return "prerelease";
+        return null;
+    }
+
     public void setRemoteProfiles(String json) {
         try {
             remoteProfiles = new ArrayList<>();
@@ -121,6 +128,7 @@ public class ContentsManager {
                     remoteProfile.verCode = object.getInt("verCode");
                     remoteProfile.id = object.optString("id", "");
                     remoteProfile.name = object.optString("name", "");
+                    remoteProfile.channel = normalizeChannel(object.optString("channel", ""));
                     remoteProfiles.add(remoteProfile);
                 } catch (JSONException e) {
                     e.printStackTrace();
@@ -159,6 +167,7 @@ public class ContentsManager {
                         for (ContentProfile profile : profiles) {
                             if (profile.verName.equals(remote.verName) && profile.verCode == remote.verCode) {
                                 exists = true;
+                                if (profile.channel == null) profile.channel = remote.channel;
                                 break;
                             }
                         }

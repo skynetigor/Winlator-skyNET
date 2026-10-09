@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.cmod.core.ProtonPackageManager
+import com.winlator.cmod.ui.container.ChannelBadge
 import com.winlator.cmod.ui.settings.GlobalLsfgCard
 
 private val bundledRuntimeId = "bundled:${ProtonPackageManager.DEFAULT_IDENTIFIER}"
@@ -518,7 +519,19 @@ private fun ComponentCard(
                 Icon(Icons.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            item.name,
+                            Modifier.weight(1f, fill = false),
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (item.channel != null) {
+                            Spacer(Modifier.width(8.dp))
+                            ChannelBadge(item.channel)
+                        }
+                    }
                     val status = when {
                         busy && installingProgress >= 0 ->
                             "${installingLabel ?: "Installing"} • ${installingProgress}%"

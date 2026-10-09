@@ -28,11 +28,13 @@ public final class ContainerCatalog {
         public final String gameVersion;
         public final String description;
         public final List<String> tags;
+        /** "stable", "prerelease" or null. */
+        public final String channel;
         /** Direct link to the .wcfg profile. */
         public final String url;
 
         Entry(String id, String name, String gameId, String gameName, String gameVersion,
-              String description, List<String> tags, String url) {
+              String description, List<String> tags, String url, String channel) {
             this.id = id;
             this.name = name;
             this.gameId = gameId;
@@ -41,6 +43,7 @@ public final class ContainerCatalog {
             this.description = description;
             this.tags = tags;
             this.url = url;
+            this.channel = channel;
         }
     }
 
@@ -78,7 +81,8 @@ public final class ContainerCatalog {
                     }
                 }
                 result.add(new Entry(object.optString("id", url), name, gameId, gameName, gameVersion,
-                        object.optString("description", "").trim(), tags, url));
+                        object.optString("description", "").trim(), tags, url,
+                        ContentsManager.normalizeChannel(object.optString("channel", ""))));
             }
             return result;
         } catch (Exception e) {

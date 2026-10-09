@@ -384,7 +384,18 @@ private fun ConfigList(configs: List<ContainerCatalog.Entry>, selected: String?,
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
                     RadioButton(selected = isSelected, onClick = { onSelect(c.id) })
                     Column(Modifier.weight(1f).padding(start = 4.dp, top = 4.dp)) {
-                        Text(c.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                c.name,
+                                Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (c.channel != null) {
+                                Spacer(Modifier.width(8.dp))
+                                ChannelBadge(c.channel)
+                            }
+                        }
                         if (c.description.isNotEmpty()) {
                             Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

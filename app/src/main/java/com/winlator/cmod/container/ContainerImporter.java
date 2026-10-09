@@ -413,8 +413,19 @@ public final class ContainerImporter {
             final AtomicBoolean ok = new AtomicBoolean(false);
             contents.extraContentFile(Uri.fromFile(tmp), new ContentsManager.OnInstallFinishedCallback() {
                 @Override public void onSucceed(ContentProfile profile) {
-                    contents.recordProfileSource(profile, remoteUrl); // keep it re-exportable
-                    ok.set(true); latch.countDown();
+                    // extraContentFile only unpacks and validates into a temp dir; the package is not
+                    // installed until finishInstallContent moves it into place.
+                    contents.finishInstallContent(profile, new ContentsManager.OnInstallFinishedCallback() {
+                        @Override public void onSucceed(ContentProfile installed) {
+                            contents.recordProfileSource(installed, remoteUrl); // keep it re-exportable
+                            ok.set(true); latch.countDown();
+                        }
+                        @Override public void onFailed(ContentsManager.InstallFailedReason reason, Exception e) {
+                            // Already installed is fine for an import.
+                            if (reason == ContentsManager.InstallFailedReason.ERROR_EXIST) ok.set(true);
+                            latch.countDown();
+                        }
+                    });
                 }
                 @Override public void onFailed(ContentsManager.InstallFailedReason reason, Exception e) { latch.countDown(); }
             });

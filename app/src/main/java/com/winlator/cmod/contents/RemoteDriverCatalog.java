@@ -32,12 +32,15 @@ public final class RemoteDriverCatalog {
         public final String repository;
         public final String name;
         public final String url;
+        /** "stable", "prerelease" or null. */
+        public final String channel;
 
-        Entry(String id, String repository, String name, String url) {
+        Entry(String id, String repository, String name, String url, String channel) {
             this.id = id;
             this.repository = repository;
             this.name = name;
             this.url = url;
+            this.channel = channel;
         }
     }
 
@@ -63,7 +66,8 @@ public final class RemoteDriverCatalog {
                     Matcher m = GITHUB_REPO.matcher(url);
                     source = m.find() ? m.group(1) : "";
                 }
-                result.add(new Entry(object.optString("id", url), source, name, url));
+                result.add(new Entry(object.optString("id", url), source, name, url,
+                        ContentsManager.normalizeChannel(object.optString("channel", ""))));
             }
         } catch (Exception ignored) {
         }

@@ -35,7 +35,9 @@ data class OnboardingComponent @JvmOverloads constructor(
     val removable: Boolean,
     val runtimeIdentifier: String? = null,
     val inUse: Boolean = false,
-    val bundled: Boolean = false
+    val bundled: Boolean = false,
+    /** "stable" or "prerelease" from the registry; null shows no badge. */
+    val channel: String? = null
 )
 
 interface OnboardingCallbacks {

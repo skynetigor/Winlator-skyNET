@@ -331,6 +331,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 item.type = typeName;
                 item.name = profile.verName;
                 item.versionCode = profile.verCode;
+                item.channel = profile.channel;
                 item.url = profile.remoteUrl;
                 item.installed = isInstalled(profile);
                 item.entryName = item.installed ? installedEntryName(type, profile) : "";
@@ -439,7 +440,8 @@ public class OnboardingActivity extends AppCompatActivity {
                         item.installed,
                         runtime,
                         inUse,
-                        false
+                        false,
+                        item.channel
                 ));
             }
         }
@@ -458,7 +460,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 if (existingDrivers.contains(driver.name.toLowerCase(Locale.ENGLISH))) continue;
                 ui.add(new OnboardingComponent(
                         remoteDriverId(driver), "AdrenoTools", driver.name + " • " + driver.repository,
-                        false, false, false, null, false, false
+                        false, false, false, null, false, false, driver.channel
                 ));
             }
         }
@@ -984,5 +986,6 @@ public class OnboardingActivity extends AppCompatActivity {
         int versionCode;
         boolean installed;
         boolean recommended;
+        String channel;
     }
 }
