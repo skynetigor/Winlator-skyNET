@@ -63,7 +63,7 @@ class EGLRenderer {
         EGLConfig config;
         EGLSurface surface = EGL_NO_SURFACE;
         EGLContext context = EGL_NO_CONTEXT;
-        DrawableShader *drawableShader;
+        DrawableShader *drawableShader = nullptr;
         ANativeWindow *window;
         std::vector<std::unique_ptr<struct RenderableWindow>> renderableWindows;
         std::thread renderingThread;

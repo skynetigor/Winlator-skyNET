@@ -50,6 +50,15 @@ public final class LinuxSession {
 
     private LinuxSession() {}
 
+    /**
+     * The X display number the guest uses. libxcb tries the abstract socket "@/tmp/.X11-unix/X<n>" before the file, and
+     * abstract sockets are shared by every app on the device: another app's X server on display 0 (Bannerlator, for
+     * one) answers first and refuses us, and libxcb does not fall back. A number of our own avoids that clash.
+     */
+    public static int displayNumber() {
+        return 100 + Process.myUid() % 800;
+    }
+
     /** The ELF header's machine type of a file: 62 is x86-64, 3 is 32-bit x86, 183 is AArch64; -1 if not an ELF file. */
     public static int elfMachine(File file) {
         if (file == null || !file.isFile()) return -1;
@@ -125,6 +134,15 @@ public final class LinuxSession {
         shmDir.mkdirs();
         home.mkdirs();
         new File(rt, "tmp/.X11-unix").mkdirs();
+        // The X server listens on X0 in this directory; the guest reaches it as X<displayNumber>.
+        File xLink = new File(imageFsRoot, "usr/tmp/.X11-unix/X" + displayNumber());
+        xLink.delete();
+        try {
+            android.system.Os.symlink("X0", xLink.getPath());
+        }
+        catch (android.system.ErrnoException e) {
+            Log.w(TAG, "Cannot link the X display", e);
+        }
         writeAccounts(rt, uid);
         writePreload(context, rt);
 
@@ -183,7 +201,7 @@ public final class LinuxSession {
         env.put("TERM", "xterm-256color");
         env.put("LANG", "C.UTF-8");
         env.put("TZ", TimeZone.getDefault().getID());
-        env.put("DISPLAY", ":0");
+        env.put("DISPLAY", ":" + displayNumber());
         env.put("XDG_RUNTIME_DIR", "/tmp");
         // Toolkits and SDL talk to the app's X server.
         env.put("GDK_BACKEND", "x11");
@@ -224,6 +242,9 @@ public final class LinuxSession {
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
             env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
             env.put("BOX64_NOBANNER", "1");
+            // Programs with an embedded Chromium (CEF) abort on the setuid sandbox check; see tools/linux-shim/cefnosb.c.
+            File cefShim = stageAsset(context, "libcefnosb_x64.so");
+            if (cefShim != null) env.put("BOX64_LD_PRELOAD", cefShim.getPath());
             env.put("BOX64_DYNAREC", "1");
             String preset = container.getExtra(LinuxEmulator.EXTRA_PRESET);
             if (preset.isEmpty()) preset = com.winlator.cmod.box64.Box64Preset.COMPATIBILITY;
@@ -287,13 +308,17 @@ public final class LinuxSession {
      * to start) out of the APK. files/ is bound into the session at its own path, so the guest can load it from there.
      */
     private static File stageShim(Context context) {
+        return stageAsset(context, "libskyshim.so");
+    }
+
+    private static File stageAsset(Context context, String name) {
         File dir = new File(context.getFilesDir(), "linux-shim");
-        File shim = new File(dir, "libskyshim.so");
-        try (java.io.InputStream in = context.getAssets().open("linux/libskyshim.so")) {
+        File shim = new File(dir, name);
+        try (java.io.InputStream in = context.getAssets().open("linux/" + name)) {
             byte[] data = in.readAllBytes();
             if (!shim.isFile() || shim.length() != data.length) {
                 dir.mkdirs();
-                File temp = new File(dir, "libskyshim.so.tmp");
+                File temp = new File(dir, name + ".tmp");
                 try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
                     out.write(data);
                 }
@@ -303,7 +328,7 @@ public final class LinuxSession {
             return shim;
         }
         catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot stage the preload shim", e);
+            Log.w(TAG, "Cannot stage " + name, e);
             return null;
         }
     }

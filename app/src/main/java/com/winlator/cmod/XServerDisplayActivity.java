@@ -599,11 +599,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
         xServer.setWinHandler(winHandler);
         if (linuxSession) {
-            // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3/Present only
-            // take the Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket.
+            // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3 only takes the
+            // Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket. Present stays:
+            // Mesa sends Present requests unconditionally and libxcb drops the connection if the server lacks it.
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
             xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
-            xServer.extensions.remove(PresentExtension.MAJOR_OPCODE);
         }
         xServer.setRelativeMouseMovement(isRelativeMouseMovement);
         advertisePanelRefreshRates();

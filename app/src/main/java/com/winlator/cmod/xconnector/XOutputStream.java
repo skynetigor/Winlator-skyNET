@@ -92,6 +92,7 @@ public class XOutputStream {
     private void flush() throws IOException {
         if (buffer.position() != 0) {
             buffer.flip();
+            if (com.winlator.cmod.xserver.XClientRequestHandler.trace) traceOutput();
             if (ancillaryFd != -1) {
                 clientSocket.sendAncillaryMsg(buffer, ancillaryFd);
                 ancillaryFd = -1;
@@ -100,6 +101,29 @@ public class XOutputStream {
             }
             buffer.clear();
         }
+    }
+
+    /** Logs what is about to be sent: the total size and the first bytes of each 32-byte reply, event or error. */
+    private void traceOutput() {
+        StringBuilder text = new StringBuilder("XOut ").append(buffer.remaining()).append("B:");
+        int start = buffer.position();
+        int shown = 0;
+        for (int offset = 0; offset + 8 <= buffer.remaining() && shown < 12; shown++) {
+            int type = buffer.get(start + offset) & 0xff;
+            int detail = buffer.get(start + offset + 1) & 0xff;
+            int seq = (buffer.get(start + offset + 2) & 0xff) | ((buffer.get(start + offset + 3) & 0xff) << 8);
+            text.append(" [type=").append(type).append(" d=").append(detail).append(" seq=").append(seq);
+            int size = 32;
+            if (type == 1 || type == 35) {
+                long extra = (buffer.get(start + offset + 4) & 0xffL) | ((buffer.get(start + offset + 5) & 0xffL) << 8)
+                        | ((buffer.get(start + offset + 6) & 0xffL) << 16) | ((buffer.get(start + offset + 7) & 0xffL) << 24);
+                text.append(" extra=").append(extra);
+                size = (int)Math.min(Integer.MAX_VALUE / 2, 32 + extra * 4);
+            }
+            text.append(']');
+            offset += size;
+        }
+        android.util.Log.d("XTrace", text.toString());
     }
 
     public XStreamLock lock() {

@@ -171,7 +171,13 @@ public class XClientRequestHandler implements RequestHandler {
             return false;
         }
         else requestLength = inputStream.readInt() * 4 - 8;
-        if (inputStream.available() < requestLength) return false;
+        if (inputStream.available() < requestLength) {
+            if (trace && requestLength > 8192) {
+                Log.d("XTrace", "waiting for a large request: op=" + (opcode & 0xff) + " needs " + requestLength
+                        + " bytes, has " + inputStream.available());
+            }
+            return false;
+        }
 
         client.generateSequenceNumber();
         client.setRequestData(requestData);
@@ -460,6 +466,9 @@ public class XClientRequestHandler implements RequestHandler {
                         Log.d("XClientRequestHandler", "X_UngrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
+                case 32: // UngrabKeyboard: no keyboard grabs are kept, so nothing to release
+                    client.skipRequest();
+                    break;
                 case 103: // GetKeyboardControl
                     try (XStreamLock lock = outputStream.lock()) {
                         outputStream.writeByte(RESPONSE_CODE_SUCCESS);
@@ -482,6 +491,8 @@ public class XClientRequestHandler implements RequestHandler {
                     }
                     else {
                         Log.w("XClientRequestHandler", "Unsupported opcode " + (opcode & 0xff));
+                        // Drop the request body, otherwise it is parsed as the next request header.
+                        client.skipRequest();
                         // A client that asked for a reply would wait for ever; answer it with an error instead.
                         if (REPLY_OPCODES.contains(opcode & 0xff)) throw new BadImplementation();
                     }

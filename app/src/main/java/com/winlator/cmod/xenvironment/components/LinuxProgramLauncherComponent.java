@@ -13,6 +13,7 @@ import com.winlator.cmod.xenvironment.EnvironmentComponent;
 import com.winlator.cmod.xenvironment.ImageFs;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,10 +57,31 @@ public class LinuxProgramLauncherComponent extends EnvironmentComponent {
         this.terminationCallback = terminationCallback;
     }
 
+    /** The X server is started just before this component; a program must not run before it accepts connections. */
+    private static void waitForXServer(File socket) {
+        long deadline = System.currentTimeMillis() + 10000;
+        while (System.currentTimeMillis() < deadline) {
+            try (android.net.LocalSocket probe = new android.net.LocalSocket()) {
+                probe.connect(new android.net.LocalSocketAddress(socket.getPath(), android.net.LocalSocketAddress.Namespace.FILESYSTEM));
+                return;
+            }
+            catch (IOException e) {
+                try {
+                    Thread.sleep(50);
+                }
+                catch (InterruptedException ignored) {
+                    return;
+                }
+            }
+        }
+        Log.w(TAG, "The X server did not accept connections within 10 s");
+    }
+
     @Override
     public void start() {
         Context context = environment.getContext();
         ImageFs imageFs = environment.getImageFs();
+        waitForXServer(new File(imageFs.getRootDir(), "usr/tmp/.X11-unix/X0"));
         LinuxSession.Launch launch = LinuxSession.build(context, imageFs, container, runtime, guestCommand);
         // Registering a callback also makes ProcessHelper pipe the output instead of discarding it.
         ProcessHelper.addDebugCallback(outputCallback);

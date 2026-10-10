@@ -198,6 +198,9 @@ void EGLRenderer::renderingThreadLoop() {
 }
 
 EGLBoolean EGLRenderer::drawFrame() {
+    // init() leaves the shader unset when the EGL context cannot be created (e.g. screen off / keyguard)
+    if (!drawableShader) return EGL_TRUE;
+
     if (toggleFullscreen) {
         fullscreen = !fullscreen;
         toggleFullscreen = false;
