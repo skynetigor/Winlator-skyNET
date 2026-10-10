@@ -108,11 +108,17 @@ public final class LinuxRuntime {
     }
 
     static void writeInfo(File dir, String id, String name, String version) {
+        writeInfo(dir, id, name, version, null);
+    }
+
+    /** {@code emulator} (for example "box64") is only set for x86 emulator packages. */
+    static void writeInfo(File dir, String id, String name, String version, String emulator) {
         try {
             JSONObject info = new JSONObject();
             info.put("id", id);
             info.put("name", name);
             info.put("version", version);
+            if (emulator != null) info.put("emulator", emulator);
             FileUtils.writeString(new File(dir, INFO_FILE), info.toString());
         }
         catch (Exception e) {}

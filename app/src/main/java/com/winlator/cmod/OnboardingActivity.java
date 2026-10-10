@@ -34,6 +34,7 @@ import com.winlator.cmod.core.ProtonPackageManager;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
 import com.winlator.cmod.linux.LinuxDriverManager;
+import com.winlator.cmod.linux.LinuxEmulator;
 import com.winlator.cmod.linux.LinuxRuntime;
 import com.winlator.cmod.linux.LinuxRuntimeCatalog;
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask;
@@ -88,12 +89,14 @@ public class OnboardingActivity extends AppCompatActivity {
     private static final int REQUEST_LOCAL_DRIVER = 824;
     private static final int REQUEST_LOCAL_LINUX_DRIVER = 825;
     private static final String LINUX_DRIVER_PREFIX = "linux-driver:";
+    private static final String LINUX_EMULATOR_PREFIX = "linux-emulator:";
 
     private final OkHttpClient http = new OkHttpClient();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ArrayList<ComponentItem> catalog = new ArrayList<>();
     private final ArrayList<RemoteDriverCatalog.Entry> remoteDrivers = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRuntimes = new ArrayList<>();
+    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxEmulators = new ArrayList<>();
 
     private SharedPreferences preferences;
     private ContentsManager contentsManager;
@@ -144,11 +147,14 @@ public class OnboardingActivity extends AppCompatActivity {
                         if (item != null) installComponent(item);
                         else if (componentId.startsWith("remote-driver:")) installRemoteDriver(componentId);
                         else if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) installLinuxRuntime(componentId);
+                        else if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) installLinuxEmulator(componentId);
                     }
 
                     @Override
                     public void onCancel(@NonNull String componentId) {
-                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) LinuxRuntimeInstallTask.cancel();
+                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX) || componentId.startsWith(LINUX_EMULATOR_PREFIX)) {
+                            LinuxRuntimeInstallTask.cancel();
+                        }
                     }
 
                     @Override
@@ -223,6 +229,7 @@ public class OnboardingActivity extends AppCompatActivity {
         loadCatalog();
         loadRemoteDrivers();
         loadLinuxRuntimes();
+        loadLinuxEmulators();
         if (!coreReady) startCoreInstallation();
     }
 
@@ -530,6 +537,36 @@ public class OnboardingActivity extends AppCompatActivity {
                     null, false, true
             ));
         }
+        Set<String> catalogEmulatorIds = new HashSet<>();
+        synchronized (linuxEmulators) {
+            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
+                catalogEmulatorIds.add(emulator.id);
+                boolean installed = LinuxEmulator.isInstalled(this, emulator.id);
+                String detail = null;
+                boolean blocked = false;
+                if (!installed) {
+                    long needed = LinuxRuntimeInstaller.requiredBytes(emulator);
+                    long free = getFilesDir().getUsableSpace();
+                    blocked = emulator.size > 0 && free < needed;
+                    detail = formatSize(emulator.size) + " download \u00b7 needs ~" + formatSize(needed)
+                            + " free \u00b7 " + formatSize(free) + " free"
+                            + (LinuxRuntimeInstaller.hasPartial(this, emulator) ? " \u00b7 partly downloaded, will resume" : "");
+                }
+                ui.add(new OnboardingComponent(
+                        LINUX_EMULATOR_PREFIX + emulator.id, "Linux Emulator", emulator.name, installed, false, installed,
+                        null, LinuxEmulator.containerUsing(this, emulator.id) != null, false, emulator.channel,
+                        detail, blocked, true
+                ));
+            }
+        }
+        for (LinuxEmulator.Installed emulator : LinuxEmulator.list(this)) {
+            if (catalogEmulatorIds.contains(emulator.id)) continue;
+            ui.add(new OnboardingComponent(
+                    LINUX_EMULATOR_PREFIX + emulator.id, "Linux Emulator", emulator.name, true, false, true,
+                    null, LinuxEmulator.containerUsing(this, emulator.id) != null, false, null,
+                    null, false, true
+            ));
+        }
         for (LinuxDriverManager.Installed driver : LinuxDriverManager.list(this)) {
             ui.add(new OnboardingComponent(
                     LINUX_DRIVER_PREFIX + driver.id, "Linux Driver", driver.label(), true, false, true,
@@ -714,12 +751,22 @@ public class OnboardingActivity extends AppCompatActivity {
         return (bytes >> 20) + " MB";
     }
 
+    /** The component id of a Linux package: emulators and runtimes share the one install task. */
+    private String linuxComponentId(String packageId) {
+        synchronized (linuxEmulators) {
+            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
+                if (emulator.id.equals(packageId)) return LINUX_EMULATOR_PREFIX + packageId;
+            }
+        }
+        return LINUX_RUNTIME_PREFIX + packageId;
+    }
+
     private final LinuxRuntimeInstallTask.Listener linuxInstallListener = new LinuxRuntimeInstallTask.Listener() {
         @Override
         public void onProgress(String id, LinuxRuntimeInstaller.Phase phase, int percent) {
             if (composeController == null) return;
             installBusy = true;
-            composeController.setInstallBusy(LINUX_RUNTIME_PREFIX + id, true);
+            composeController.setInstallBusy(linuxComponentId(id), true);
             switch (phase) {
                 case DOWNLOAD:
                     composeController.updateInstallProgress("Downloading", percent * 80 / 100);
@@ -803,6 +850,65 @@ public class OnboardingActivity extends AppCompatActivity {
                 .show();
     }
 
+    private void loadLinuxEmulators() {
+        io.execute(() -> {
+            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetchEmulators();
+            if (loaded == null) return;
+            synchronized (linuxEmulators) {
+                linuxEmulators.clear();
+                linuxEmulators.addAll(loaded);
+            }
+            runOnUiThread(this::syncComposeCatalog);
+        });
+    }
+
+    private void installLinuxEmulator(String componentId) {
+        if (installBusy) return;
+        LinuxRuntimeCatalog.Entry found = null;
+        synchronized (linuxEmulators) {
+            for (LinuxRuntimeCatalog.Entry emulator : linuxEmulators) {
+                if ((LINUX_EMULATOR_PREFIX + emulator.id).equals(componentId)) found = emulator;
+            }
+        }
+        if (found == null) return;
+        if (LinuxRuntimeInstallTask.start(this, found)) {
+            installBusy = true;
+            composeController.setInstallBusy(componentId, true);
+            composeController.updateInstallProgress("Starting", 0);
+        }
+    }
+
+    private void requestRemoveLinuxEmulator(String componentId) {
+        String id = componentId.substring(LINUX_EMULATOR_PREFIX.length());
+        String using = LinuxEmulator.containerUsing(this, id);
+        if (using != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Emulator is in use")
+                    .setMessage("This emulator cannot be deleted because it is used by " + using + ".")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Delete emulator?")
+                .setMessage("The installed files will be removed. You can download it again later.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Delete", (d, w) -> {
+                    if (installBusy) return;
+                    installBusy = true;
+                    composeController.setInstallBusy(componentId, true);
+                    io.execute(() -> {
+                        LinuxEmulator.remove(this, id);
+                        runOnUiThread(() -> {
+                            installBusy = false;
+                            composeController.setInstallBusy(null, false);
+                            syncComposeCatalog();
+                        });
+                    });
+                })
+                .show();
+    }
+
     private void requestRemoveLinuxDriver(String componentId) {
         String id = componentId.substring(LINUX_DRIVER_PREFIX.length());
         String using = LinuxDriverManager.containerUsing(this, id);
@@ -835,6 +941,10 @@ public class OnboardingActivity extends AppCompatActivity {
     }
 
     private void requestRemoveComponent(String componentId) {
+        if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) {
+            requestRemoveLinuxEmulator(componentId);
+            return;
+        }
         if (componentId.startsWith(LINUX_DRIVER_PREFIX)) {
             requestRemoveLinuxDriver(componentId);
             return;

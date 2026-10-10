@@ -77,6 +77,7 @@ import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
 import com.winlator.cmod.linux.LinuxRuntime;
+import com.winlator.cmod.xserver.XClientRequestHandler;
 import com.winlator.cmod.xserver.extensions.DRI3Extension;
 import com.winlator.cmod.xserver.extensions.MITSHMExtension;
 import com.winlator.cmod.xserver.extensions.PresentExtension;
@@ -1278,6 +1279,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String rootPath = imageFs.getRootDir().getPath();
         FileUtils.clear(imageFs.getTmpDir());
 
+        // A file named .xtrace in the container's home turns on logging of every X request (logcat tag XTrace).
+        XClientRequestHandler.trace = new File(container.getLinuxHomeDir(), ".xtrace").exists();
+
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(
                 new SysVSharedMemoryComponent(
@@ -1291,7 +1295,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = LinuxSession.programCommand(shortcut.path);
+        String[] command = LinuxSession.programCommand(this, container, shortcut.path);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.

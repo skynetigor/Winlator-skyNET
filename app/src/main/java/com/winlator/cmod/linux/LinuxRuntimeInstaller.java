@@ -57,7 +57,7 @@ public final class LinuxRuntimeInstaller {
     }
 
     private static File downloadDir(Context context) {
-        return new File(LinuxRuntime.runtimesDir(context), ".download");
+        return new File(LinuxPackages.baseDir(context, LinuxPackages.KIND_RUNTIME), ".download");
     }
 
     /** True when a partial download for this runtime is waiting to be resumed. */
@@ -72,13 +72,15 @@ public final class LinuxRuntimeInstaller {
     /** Finishes or undoes swaps that were cut short. Safe to call at any time. */
     public static void recoverInterruptedSwaps(Context context) {
         if (installing) return;
-        File[] files = LinuxRuntime.runtimesDir(context).listFiles();
-        if (files == null) return;
-        for (File file : files) {
-            String name = file.getName();
-            if (!name.endsWith(".old")) continue;
-            File root = new File(file.getParentFile(), name.substring(0, name.length() - 4));
-            if (!root.exists()) file.renameTo(root);
+        for (String kind : new String[]{LinuxPackages.KIND_RUNTIME, LinuxPackages.KIND_EMULATOR, LinuxPackages.KIND_ROOTFS}) {
+            File[] files = LinuxPackages.baseDir(context, kind).listFiles();
+            if (files == null) continue;
+            for (File file : files) {
+                String name = file.getName();
+                if (!name.endsWith(".old")) continue;
+                File root = new File(file.getParentFile(), name.substring(0, name.length() - 4));
+                if (!root.exists()) file.renameTo(root);
+            }
         }
     }
 
@@ -86,8 +88,8 @@ public final class LinuxRuntimeInstaller {
     public static synchronized String install(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
         cancelRequested = false;
         installing = true;
-        File runtimes = LinuxRuntime.runtimesDir(context);
-        File root = LinuxRuntime.rootDir(context, entry.id);
+        File runtimes = LinuxPackages.baseDir(context, entry.kind);
+        File root = LinuxPackages.rootDir(context, entry.kind, entry.id);
         File staging = new File(runtimes, entry.id + ".new");
         File old = new File(runtimes, entry.id + ".old");
         File part = partFile(context, entry);
@@ -111,7 +113,9 @@ public final class LinuxRuntimeInstaller {
             FileUtils.delete(staging);
             if (!staging.mkdirs()) return "Cannot create " + staging;
             extract(part, staging, progress);
-            LinuxRuntime.writeInfo(staging, entry.id, entry.name, entry.version);
+            // An emulator package is one folder (box64-0.4.4-linux-aarch64/bin/...); its contents are the install.
+            if (LinuxPackages.KIND_EMULATOR.equals(entry.kind)) flattenSingleFolder(staging);
+            LinuxRuntime.writeInfo(staging, entry.id, entry.name, entry.version, entry.emulator);
 
             FileUtils.delete(old);
             if (root.exists() && !root.renameTo(old)) return "Cannot replace the installed runtime";
@@ -218,6 +222,20 @@ public final class LinuxRuntimeInstaller {
             return connection;
         }
         throw new IOException("Too many redirects");
+    }
+
+    /** If the directory holds exactly one folder, moves that folder's contents up into it. */
+    private static void flattenSingleFolder(File dir) throws IOException {
+        File[] children = dir.listFiles();
+        if (children == null || children.length != 1 || !children[0].isDirectory()) return;
+        File top = children[0];
+        File[] inner = top.listFiles();
+        if (inner != null) {
+            for (File file : inner) {
+                if (!file.renameTo(new File(dir, file.getName()))) throw new IOException("Cannot move " + file);
+            }
+        }
+        top.delete();
     }
 
     private static String sha256(File file, Progress progress) throws Exception {

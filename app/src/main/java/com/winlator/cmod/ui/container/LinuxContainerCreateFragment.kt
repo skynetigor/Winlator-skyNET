@@ -42,7 +42,10 @@ import androidx.fragment.app.Fragment
 import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.GPUInformation
+import com.winlator.cmod.box64.Box64Preset
+import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.linux.LinuxDriverManager
+import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
@@ -161,6 +164,11 @@ private fun LinuxContainerEditor(
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
+    var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: LinuxEmulator.NONE) }
+    var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: "") }
+    var emulatorPreset by remember {
+        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_PRESET)?.takeIf { it.isNotEmpty() } ?: Box64Preset.COMPATIBILITY)
+    }
     var glDriver by remember {
         mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
     }
@@ -193,6 +201,8 @@ private fun LinuxContainerEditor(
 
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
     val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
+    val boxBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
+    val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // Until the user picks one, the first installed runtime is used.
     val selected = runtimes.firstOrNull { it.id == chosenRuntimeId } ?: runtimes.firstOrNull()
     val sizeValid = SIZE_PATTERN.matches(screenSize.trim())
@@ -227,6 +237,10 @@ private fun LinuxContainerEditor(
         container.putExtra(LinuxDriverManager.EXTRA_DRIVER, driverId)
         container.putExtra(LinuxSession.EXTRA_VULKAN_PRESENT, if (softwareOutput) "sw" else "native")
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
+        container.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulator)
+        // Until the user picks a build, the first installed one is used.
+        container.putExtra(LinuxEmulator.EXTRA_ID, if (emulator == LinuxEmulator.NONE) "" else (boxBuilds.firstOrNull { it.id == emulatorId } ?: boxBuilds.firstOrNull())?.id ?: "")
+        container.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset)
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
     }
@@ -380,6 +394,34 @@ private fun LinuxContainerEditor(
                 ) { glDriver = it }
                 SettingsDivider()
                 SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
+            }
+
+            SectionTitle("x86 emulation")
+            SettingsCard {
+                SettingMappedChoice(
+                    "x86 emulator",
+                    emulator,
+                    linkedMapOf(LinuxEmulator.NONE to "None (ARM64 programs only)", LinuxEmulator.BOX64 to "Box64")
+                ) { emulator = it }
+                if (emulator == LinuxEmulator.BOX64) {
+                    SettingsDivider()
+                    if (boxBuilds.isEmpty()) {
+                        Text(
+                            "No Box64 build is installed. Install one in Components → Linux Emulator.",
+                            modifier = Modifier.padding(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        val shown = boxBuilds.firstOrNull { it.id == emulatorId } ?: boxBuilds.first()
+                        SettingMappedChoice(
+                            "Box64 build",
+                            shown.id,
+                            boxBuilds.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
+                        ) { emulatorId = it }
+                    }
+                    SettingsDivider()
+                    SettingMappedChoice("Box64 preset", emulatorPreset, boxPresets) { emulatorPreset = it }
+                }
             }
 
             SectionTitle("Performance")

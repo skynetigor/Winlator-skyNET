@@ -62,9 +62,10 @@ private val bundledRuntimeName = ProtonPackageManager.getPackage(ProtonPackageMa
 private const val frameGenerationCategory = "Frame Generation"
 private const val linuxRuntimeCategory = "Linux Runtime"
 private const val linuxDriverCategory = "Linux Driver"
+private const val linuxEmulatorCategory = "Linux Emulator"
 
 private val componentCategories = listOf(
-    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory, frameGenerationCategory
+    "Recommended", "Wine & Proton", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory, linuxEmulatorCategory, frameGenerationCategory
 )
 
 private val latestRecommendedTypes = setOf("DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64")
@@ -122,7 +123,7 @@ private fun componentVersionParts(type: String, name: String): List<Int> {
     return token.split('.').map { it.toIntOrNull() ?: 0 }
 }
 
-private val componentTypeOrder = listOf("Proton", "Wine", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory)
+private val componentTypeOrder = listOf("Proton", "Wine", "DXVK", "VKD3D", "FEXCore", "Box64", "WOWBox64", "AdrenoTools", linuxRuntimeCategory, linuxDriverCategory, linuxEmulatorCategory)
 
 /** Every number in the name, e.g. "Turnip_Gen8_V36" -> [8, 36], so drivers and 11.0-2 style suffixes sort sensibly. */
 private fun nameNumbers(name: String): List<Int> =
@@ -399,7 +400,7 @@ private fun ComponentSearchField(value: String, onChange: (String) -> Unit) {
 @Composable
 private fun LocalInstallButton(category: String, cb: OnboardingCallbacks, modifier: Modifier) {
     when (category) {
-        frameGenerationCategory, linuxRuntimeCategory -> Unit
+        frameGenerationCategory, linuxRuntimeCategory, linuxEmulatorCategory -> Unit
         linuxDriverCategory -> OutlinedButton(onClick = { cb.onBrowseLinuxDriver() }, modifier = modifier) { Text("Install Linux driver") }
         "AdrenoTools" -> OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = modifier) { Text("Install local driver") }
         else -> OutlinedButton(onClick = { cb.onBrowseLocal() }, modifier = modifier) { Text("Install local component") }

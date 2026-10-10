@@ -7,6 +7,7 @@ import com.winlator.cmod.xconnector.RequestHandler;
 import com.winlator.cmod.xconnector.XInputStream;
 import com.winlator.cmod.xconnector.XOutputStream;
 import com.winlator.cmod.xconnector.XStreamLock;
+import com.winlator.cmod.xserver.errors.BadImplementation;
 import com.winlator.cmod.xserver.errors.XRequestError;
 import com.winlator.cmod.xserver.extensions.Extension;
 import com.winlator.cmod.xserver.requests.AtomRequests;
@@ -28,6 +29,14 @@ public class XClientRequestHandler implements RequestHandler {
     public static final byte RESPONSE_CODE_ERROR = 0;
     public static final byte RESPONSE_CODE_SUCCESS = 1;
     public static final int MAX_REQUEST_LENGTH = 65535;
+
+    /** Core requests that are answered with a reply; an unsupported one gets an error so the client does not hang. */
+    private static final java.util.Set<Integer> REPLY_OPCODES = new java.util.HashSet<>(java.util.Arrays.asList(
+            3, 14, 15, 16, 17, 20, 21, 23, 26, 31, 38, 39, 40, 43, 44, 47, 48, 49, 50, 52, 73, 83, 84, 85, 86, 87,
+            91, 92, 97, 98, 99, 101, 103, 106, 108, 110, 116, 117, 118, 119));
+
+    /** Log every request (client, sequence number, opcode) to logcat tag XTrace; for finding what a program waits on. */
+    public static volatile boolean trace = false;
 
     @Override
     public boolean handleRequest(Client client) throws IOException {
@@ -167,6 +176,11 @@ public class XClientRequestHandler implements RequestHandler {
         client.generateSequenceNumber();
         client.setRequestData(requestData);
         client.setRequestLength(requestLength);
+
+        if (trace) {
+            Log.d("XTrace", "client=" + client.resourceIDBase + " seq=" + client.getSequenceNumber()
+                    + " op=" + (opcode & 0xff) + " data=" + (requestData & 0xff) + " len=" + requestLength);
+        }
 
         try {
             switch (opcode) {
@@ -446,12 +460,31 @@ public class XClientRequestHandler implements RequestHandler {
                         Log.d("XClientRequestHandler", "X_UngrabServer request handled successfully:" + outputStream.buffer.position());
                     }
                     break;
+                case 103: // GetKeyboardControl
+                    try (XStreamLock lock = outputStream.lock()) {
+                        outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                        outputStream.writeByte((byte) 1); // global auto repeat: on
+                        outputStream.writeShort(client.getSequenceNumber());
+                        outputStream.writeInt(5);
+                        outputStream.writeInt(0); // LED mask
+                        outputStream.writeByte((byte) 0); // key click percent
+                        outputStream.writeByte((byte) 50); // bell percent
+                        outputStream.writeShort((short) 400); // bell pitch
+                        outputStream.writeShort((short) 100); // bell duration
+                        outputStream.writePad(2);
+                        for (int i = 0; i < 32; i++) outputStream.writeByte((byte) 0xff); // every key repeats
+                    }
+                    break;
                 default:
                     if (opcode < 0) {
                         Extension extension = client.xServer.extensions.get(opcode);
                         if (extension != null) extension.handleRequest(client, inputStream, outputStream);
                     }
-                    else Log.d("XClientRequestHandler", "Unsupported opcode " + opcode);
+                    else {
+                        Log.w("XClientRequestHandler", "Unsupported opcode " + (opcode & 0xff));
+                        // A client that asked for a reply would wait for ever; answer it with an error instead.
+                        if (REPLY_OPCODES.contains(opcode & 0xff)) throw new BadImplementation();
+                    }
                     break;
             }
         }

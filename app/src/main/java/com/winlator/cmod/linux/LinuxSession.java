@@ -50,12 +50,59 @@ public final class LinuxSession {
 
     private LinuxSession() {}
 
-    /** A program started from a shortcut: scripts through bash, anything else executed from its own directory. */
-    public static String[] programCommand(String path) {
+    /** The ELF header's machine type of a file: 62 is x86-64, 3 is 32-bit x86, 183 is AArch64; -1 if not an ELF file. */
+    public static int elfMachine(File file) {
+        if (file == null || !file.isFile()) return -1;
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            byte[] header = new byte[20];
+            if (in.read(header) < 20) return -1;
+            if (header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F') return -1;
+            return (header[18] & 0xff) | ((header[19] & 0xff) << 8);
+        }
+        catch (java.io.IOException e) {
+            return -1;
+        }
+    }
+
+    /** Where a program, given as the guest sees its path, lives on the host (null if it cannot be told). */
+    private static File hostFile(Context context, Container container, String guestPath) {
+        if (guestPath.startsWith("/root/")) return new File(container.getLinuxHomeDir(), guestPath.substring(6));
+        if (guestPath.startsWith("/storage/") || guestPath.startsWith("/data/")) return new File(guestPath);
+        LinuxRuntime.Installed runtime = LinuxRuntime.resolve(context, container);
+        return runtime == null ? null : new File(LinuxRuntime.rootDir(context, runtime.id), guestPath.substring(1));
+    }
+
+    /** A command that only prints why the program cannot start, so the failure dialog explains it. */
+    private static String[] refusal(String message) {
+        return new String[]{"/bin/sh", "-c", "echo \"$1\" >&2; exit 127", "bannerlator-run", message};
+    }
+
+    /**
+     * A program started from a shortcut. Scripts run through bash and ARM64 programs run natively; an x86-64 program
+     * is started through the container's emulator, or refused with a message when there is none to use.
+     */
+    public static String[] programCommand(Context context, Container container, String path) {
+        String emulatorPath = "";
+        int machine = elfMachine(hostFile(context, container, path));
+        if (machine == 62) {
+            String choice = LinuxEmulator.choice(container);
+            LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
+            if (choice.equals(LinuxEmulator.NONE)) {
+                return refusal("This is an x86-64 program. Choose an x86 emulator (Box64) in the container's settings.");
+            }
+            if (emulator == null) {
+                return refusal("The selected x86 emulator is not installed. Install it in Components, Linux Emulator.");
+            }
+            emulatorPath = new File(emulator.dir, emulator.emulator.equals(LinuxEmulator.FEX) ? "bin/FEXInterpreter" : "bin/box64").getPath();
+        }
+        else if (machine == 3) {
+            return refusal("This is a 32-bit x86 program. Only x86-64 programs are supported for now.");
+        }
         return new String[]{
                 "/bin/bash", "-c",
-                "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" && case \"$1\" in *.sh) exec bash \"$1\";; *) exec \"$1\";; esac",
-                "bannerlator-run", path
+                "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" && case \"$1\" in *.sh) exec bash \"$1\";; "
+                        + "*) if [ -n \"$2\" ]; then exec \"$2\" \"$1\"; else exec \"$1\"; fi;; esac",
+                "bannerlator-run", path, emulatorPath
         };
     }
 
@@ -79,7 +126,7 @@ public final class LinuxSession {
         home.mkdirs();
         new File(rt, "tmp/.X11-unix").mkdirs();
         writeAccounts(rt, uid);
-        writePreload(rt);
+        writePreload(context, rt);
 
         List<String> argv = new ArrayList<>();
         argv.add(proot.getPath());
@@ -172,6 +219,30 @@ public final class LinuxSession {
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
 
+        LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
+        if (emulator != null && emulator.emulator.equals(LinuxEmulator.BOX64)) {
+            // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
+            env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
+            env.put("BOX64_NOBANNER", "1");
+            env.put("BOX64_DYNAREC", "1");
+            String preset = container.getExtra(LinuxEmulator.EXTRA_PRESET);
+            if (preset.isEmpty()) preset = com.winlator.cmod.box64.Box64Preset.COMPATIBILITY;
+            for (String pair : com.winlator.cmod.box64.Box64PresetManager.getEnvVars("box64", context, preset).toStringArray()) {
+                int index = pair.indexOf('=');
+                if (index > 0) env.put(pair.substring(0, index), pair.substring(index + 1));
+            }
+        }
+
+        // Native libraries the emulated program's wrapped libraries need that the runtime does not ship: the
+        // emulator package's lib/host and the container's own hostlibs folder.
+        java.util.List<String> extraLibs = new ArrayList<>();
+        File containerLibs = new File(container.getLinuxHomeDir(), "hostlibs");
+        if (containerLibs.isDirectory()) extraLibs.add("/root/hostlibs");
+        if (emulator != null && new File(emulator.dir, "lib/host").isDirectory()) {
+            extraLibs.add(new File(emulator.dir, "lib/host").getPath());
+        }
+        if (!extraLibs.isEmpty()) env.put("LD_LIBRARY_PATH", String.join(":", extraLibs));
+
         env.putAll(userEnv(container));
 
         List<String> result = new ArrayList<>();
@@ -201,10 +272,40 @@ public final class LinuxSession {
     }
 
     /** The runtime's shim library (SysV IPC and other things Android withholds) is loaded into every process. */
-    private static void writePreload(File rt) {
+    private static void writePreload(Context context, File rt) {
         File preload = new File(rt, "etc/ld.so.preload");
-        if (new File(rt, PRELOAD.substring(1)).exists()) FileUtils.writeString(preload, PRELOAD + "\n");
+        StringBuilder libraries = new StringBuilder();
+        if (new File(rt, PRELOAD.substring(1)).exists()) libraries.append(PRELOAD).append('\n');
+        File shim = stageShim(context);
+        if (shim != null) libraries.append(shim.getPath()).append('\n');
+        if (libraries.length() > 0) FileUtils.writeString(preload, libraries.toString());
         else preload.delete();
+    }
+
+    /**
+     * Copies our own preload library (tools/linux-shim: answers the uevent socket that Android refuses, which SDL needs
+     * to start) out of the APK. files/ is bound into the session at its own path, so the guest can load it from there.
+     */
+    private static File stageShim(Context context) {
+        File dir = new File(context.getFilesDir(), "linux-shim");
+        File shim = new File(dir, "libskyshim.so");
+        try (java.io.InputStream in = context.getAssets().open("linux/libskyshim.so")) {
+            byte[] data = in.readAllBytes();
+            if (!shim.isFile() || shim.length() != data.length) {
+                dir.mkdirs();
+                File temp = new File(dir, "libskyshim.so.tmp");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                    out.write(data);
+                }
+                FileUtils.chmod(temp, 0755);
+                if (!temp.renameTo(shim)) return null;
+            }
+            return shim;
+        }
+        catch (java.io.IOException e) {
+            Log.w(TAG, "Cannot stage the preload shim", e);
+            return null;
+        }
     }
 
     private static void bind(List<String> argv, String path) {

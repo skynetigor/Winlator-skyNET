@@ -14,6 +14,7 @@ import com.winlator.cmod.xserver.extensions.GLXExtension;
 import com.winlator.cmod.xserver.extensions.MITSHMExtension;
 import com.winlator.cmod.xserver.extensions.PresentExtension;
 import com.winlator.cmod.xserver.extensions.RandrExtension;
+import com.winlator.cmod.xserver.extensions.ScreenSaverExtension;
 import com.winlator.cmod.xserver.extensions.SyncExtension;
 
 import com.winlator.cmod.xserver.extensions.XCompositeExtension;
@@ -241,6 +242,7 @@ public class XServer {
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension(this));
         extensions.put(GLXExtension.MAJOR_OPCODE, new GLXExtension(this));
         extensions.put(XCompositeExtension.MAJOR_OPCODE, new XCompositeExtension(this));
+        extensions.put(ScreenSaverExtension.MAJOR_OPCODE, new ScreenSaverExtension());
     }
 
     public <T extends Extension> T getExtension(int opcode) {

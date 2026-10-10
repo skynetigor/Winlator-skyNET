@@ -62,6 +62,8 @@ import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.Callback
 import com.winlator.cmod.core.FileUtils
+import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxSession
 import com.winlator.cmod.ui.theme.WinZTheme
 import java.io.File
 import java.util.Locale
@@ -169,6 +171,12 @@ private fun LinuxProgramsScreen(containerId: Int, onBack: () -> Unit) {
                 "Cannot read this file's location. Pick it from \"Internal storage\" in the file browser.",
                 Toast.LENGTH_LONG
             ).show()
+            return@rememberLauncherForActivityResult
+        }
+        if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) != LinuxEmulator.NONE) {
+            // An x86-64 program is read by the emulator, not run by the kernel, so it can stay on shared storage.
+            ContainerManager.addLinuxShortcut(container, file.nameWithoutExtension, file.path)
+            tick++
             return@rememberLauncherForActivityResult
         }
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.

@@ -17,6 +17,9 @@ public abstract class ExtensionRequests {
         inputStream.skip(2);
         String name = inputStream.readString8(length);
         Extension extension = client.xServer.getExtensionByName(name);
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            android.util.Log.d("XTrace", "QueryExtension " + name + " -> " + (extension != null ? "yes" : "NO"));
+        }
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
             outputStream.writeByte((byte)0);
