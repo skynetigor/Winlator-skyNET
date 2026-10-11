@@ -44,6 +44,7 @@ static uint32_t (*SDL_GetWindowFlags)(void *);
 static uint32_t (*SDL_GetTicks)(void);
 static int (*SDL_GetWindowWMInfo)(void *, void *);
 static uint32_t (*SDL_GetWindowID)(void *);
+static uint8_t (*SDL_EventState)(uint32_t, int);
 
 #define INIT_VIDEO 0x20u
 #define WINDOW_SHOWN 0x4u
@@ -146,6 +147,7 @@ int main(void) {
     SYM(SDL_GetMouseState, "SDL_GetMouseState"); SYM(SDL_GetWindowFlags, "SDL_GetWindowFlags");
     SYM(SDL_GetTicks, "SDL_GetTicks");
     SYM(SDL_GetWindowWMInfo, "SDL_GetWindowWMInfo"); SYM(SDL_GetWindowID, "SDL_GetWindowID");
+    SYM(SDL_EventState, "SDL_EventState");
     if (!SDL_Init || !SDL_CreateRenderer || !SDL_RenderFillRect) {
         printf("mousetest: this libSDL2 is missing what the test needs\n");
         return 1;
@@ -182,12 +184,17 @@ int main(void) {
         else printf("SDL_GetWindowWMInfo refused: %s\n", SDL_GetError());
     }
 
+    // SDL raises one of these for every X event its own dispatcher handles, which says whether an event
+    // that never became an SDL event was dropped before SDL saw it or after.
+    if (SDL_EventState) SDL_EventState(0x201 /* SDL_SYSWMEVENT */, 1 /* SDL_ENABLE */);
+
     int mouseX = WIDTH / 2, mouseY = HEIGHT / 2;
     int lastRelX = 0, lastRelY = 0;
     int wheelX = 0, wheelY = 0;
     int motions = 0;
     int keys = 0, lastScancode = 0, lastMod = 0;
     uint32_t lastReport = 0;
+    int xcount[64]; memset(xcount, 0, sizeof xcount);
     int hasPointer = 0, hasKeyboard = 0;
 
     char buffer[256];
@@ -240,6 +247,15 @@ int main(void) {
                 else if (what == 11) { hasPointer = 0; printf("pointer left\n"); }
                 else if (what == 12) { hasKeyboard = 1; printf("focus gained\n"); }
                 else if (what == 13) { hasKeyboard = 0; printf("focus lost\n"); }
+            }
+            else if (type == 0x201) {            /* SDL_SYSWMEVENT: the X event SDL is dispatching */
+                void *msg;
+                memcpy(&msg, buffer + 8, sizeof msg);
+                if (msg) {
+                    int32_t xtype;
+                    memcpy(&xtype, (char *)msg + 8, 4);   /* SDL_SysWMmsg: version, subsystem, then the XEvent */
+                    if (xtype != 6) { xcount[xtype & 63]++; printf("X event %d reached SDL\n", xtype); }
+                }
             }
             else if (type != 0x400 && type != 0x200) {
                 printf("other event 0x%x\n", type);   /* anything not handled above, motion aside */
@@ -306,6 +322,9 @@ int main(void) {
                    SDL_GetKeyboardFocus && SDL_GetKeyboardFocus() == window ? "ours" : "none",
                    SDL_GetMouseFocus && SDL_GetMouseFocus() == window ? "ours" : "none",
                    SDL_GetWindowFlags ? SDL_GetWindowFlags(window) : 0, buttons, px, py);
+            printf("  X events seen by SDL:");
+            for (int t = 0; t < 64; t++) if (xcount[t]) printf(" %d=%d", t, xcount[t]);
+            printf("\n");
         }
     }
 

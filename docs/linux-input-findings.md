@@ -57,14 +57,39 @@ core ButtonPress: pointWindow=4194312 grabWindow=4194312 enabled=true listeners=
 and the counts for one click and one key press come out as ButtonPress 1, ButtonRelease 1, KeyPress 1,
 KeyRelease 1, FocusIn 6, MotionNotify 47, XI2 generic events 96. SDL raises only the motion.
 
-Two leads, in order:
+### Narrowed to this
 
-1. **The window id in the event.** SDL drops an event whose `xany.window` is not one of its own windows,
-   without a word. The window we deliver to was inferred from SDL's XI2 selections; it has not been compared
-   against what SDL itself reports through `SDL_GetWindowWMInfo`. The tester now prints that.
-2. **Focus.** SDL asked `GetInputFocus` nine times in one run: it confirms the focus by asking rather than
-   trusting the event. Why it then refuses is not yet known. Note that SDL never uses
-   `XIPassiveGrabDevice`, so the handler written for that in `XInput2Extension` is dead code for this SDL.
+The window is right: SDL reports its own X window as `0x400008`, which is the 4194312 the server delivers
+to. That lead is closed.
+
+With `SDL_SYSWMEVENT` turned on, SDL reports every X event its own dispatcher handles. Over a whole run with
+a click and a key press, it saw:
+
+```
+X events seen by SDL: 22=1 28=3 35=2
+```
+
+ConfigureNotify once, PropertyNotify three times, GenericEvent twice — the two GenericEvents being the XI2
+raw button press and release. **No core event ever reaches SDL's dispatcher**: not ButtonPress, not
+KeyPress, not FocusIn, not EnterNotify, though the server sends all of them to that window and a plain Xlib
+client on the same server receives them normally.
+
+So the question is no longer "why does SDL ignore our events" but "why do our core events never arrive on
+SDL's connection, while our XI2 events on the same connection do".
+
+Ruled out so far: the window id; the input method (`XMODIFIERS=@im=none` changes nothing);
+`XIPassiveGrabDevice`, which this SDL never uses, so the handler written for it in `XInput2Extension` is
+dead code.
+
+Worth trying next:
+
+1. Diff the two connections in the request trace — what SDL does at setup that the raw Xlib probe does not.
+   The raw probe gets core events; SDL does not; something in between differs.
+2. Check the server's own delivery once a client holds XI2 selections. The trace says the core listener is
+   there (`listeners=1`) and the bytes are written, so suspect what is written rather than whether:
+   the event's sequence number, or a flush that waits behind another thread's hold on the stream lock.
+3. SDL asked `GetInputFocus` nine times in one run — it confirms focus by asking rather than trusting the
+   event. If the core FocusIn never arrives, that polling is all it has left.
 
 ## Fixed along the way
 
