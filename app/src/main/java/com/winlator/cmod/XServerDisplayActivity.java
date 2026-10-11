@@ -380,9 +380,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         });
 
-        boolean enableLogs = preferences.getBoolean("enable_wine_debug", false)
-                || preferences.getBoolean("enable_box64_logs", false);
-        boolean enableWinlatorLogs = preferences.getBoolean("enable_winlator_logs", false);
+        boolean enableLogs = preferences.getBoolean("enable_wine_debug", AppUtils.isDebugBuild(this))
+                || preferences.getBoolean("enable_box64_logs", AppUtils.isDebugBuild(this));
+        boolean enableWinlatorLogs = preferences.getBoolean("enable_winlator_logs", AppUtils.isDebugBuild(this));
 
         wireSidebarListeners(enableLogs);
 
@@ -1155,7 +1155,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("LC_ALL", lc_all);
         envVars.put("WINEPREFIX", imageFs.wineprefix);
 
-        boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", false);
+        boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", AppUtils.isDebugBuild(this));
         String wineDebugChannels = preferences.getString("wine_debug_channels",
                 SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
         envVars.put("WINEDEBUG", enableWineDebug && !wineDebugChannels.isEmpty()

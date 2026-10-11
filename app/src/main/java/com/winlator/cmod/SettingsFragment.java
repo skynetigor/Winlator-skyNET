@@ -295,16 +295,16 @@ public class SettingsFragment extends Fragment {
         }
 
         final CheckBox cbEnableWineDebug = view.findViewById(R.id.CBEnableWineDebug);
-        cbEnableWineDebug.setChecked(preferences.getBoolean("enable_wine_debug", false));
+        cbEnableWineDebug.setChecked(preferences.getBoolean("enable_wine_debug", AppUtils.isDebugBuild(requireContext())));
 
         final ArrayList<String> wineDebugChannels = new ArrayList<>(Arrays.asList(preferences.getString("wine_debug_channels", DEFAULT_WINE_DEBUG_CHANNELS).split(",")));
         loadWineDebugChannels(view, wineDebugChannels);
 
         final CheckBox cbEnableWinlatorLogs = view.findViewById(R.id.CBEnableWinlatorLogs);
-        cbEnableWinlatorLogs.setChecked(preferences.getBoolean("enable_winlator_logs", false));
+        cbEnableWinlatorLogs.setChecked(preferences.getBoolean("enable_winlator_logs", AppUtils.isDebugBuild(requireContext())));
 
         final CheckBox cbEnableBox64Logs = view.findViewById(R.id.CBEnableBox64Logs);
-        cbEnableBox64Logs.setChecked(preferences.getBoolean("enable_box64_logs", false));
+        cbEnableBox64Logs.setChecked(preferences.getBoolean("enable_box64_logs", AppUtils.isDebugBuild(requireContext())));
 
         final TextView tvCursorSpeed = view.findViewById(R.id.TVCursorSpeed);
         final SeekBar sbCursorSpeed = view.findViewById(R.id.SBCursorSpeed);
@@ -464,10 +464,10 @@ public class SettingsFragment extends Fragment {
                 preferences.getBoolean("pause_resume_wine", true),
                 preferences.getBoolean("remove_loading_bar_when_booting_games", false),
                 preferences.getBoolean("game_saves_all_shortcuts", false),
-                preferences.getBoolean("enable_wine_debug", false),
+                preferences.getBoolean("enable_wine_debug", AppUtils.isDebugBuild(requireContext())),
                 preferences.getString("wine_debug_channels", DEFAULT_WINE_DEBUG_CHANNELS),
-                preferences.getBoolean("enable_winlator_logs", false),
-                preferences.getBoolean("enable_box64_logs", false),
+                preferences.getBoolean("enable_winlator_logs", AppUtils.isDebugBuild(requireContext())),
+                preferences.getBoolean("enable_box64_logs", AppUtils.isDebugBuild(requireContext())),
                 preferences.getBoolean("enable_custom_api_key", false),
                 preferences.getString("custom_api_key", ""),
                 preferences.getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES),

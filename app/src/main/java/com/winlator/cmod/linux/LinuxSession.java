@@ -279,6 +279,11 @@ public final class LinuxSession {
             }
             if (preload.length() > 0) env.put("BOX64_LD_PRELOAD", preload.toString());
             env.put("BOX64_DYNAREC", "1");
+            // The Box64 log switch in Settings (on by default in a debug build) reaches Linux sessions too.
+            if (androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                    .getBoolean("enable_box64_logs", com.winlator.cmod.core.AppUtils.isDebugBuild(context))) {
+                env.put("BOX64_LOG", "1");
+            }
             String preset = container.getExtra(LinuxEmulator.EXTRA_PRESET);
             if (preset.isEmpty()) preset = com.winlator.cmod.box64.Box64Preset.COMPATIBILITY;
             for (String pair : com.winlator.cmod.box64.Box64PresetManager.getEnvVars("box64", context, preset).toStringArray()) {

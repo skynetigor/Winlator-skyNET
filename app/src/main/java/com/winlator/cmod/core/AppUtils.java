@@ -349,4 +349,12 @@ public abstract class AppUtils {
         }, delay);
     }
 
+
+    /**
+     * True when the app is a debug build. The log switches (Wine debug, Winlator logs, Box64 logs) start out on in
+     * such a build, and off in a release; a choice the user makes in Settings still wins.
+     */
+    public static boolean isDebugBuild(android.content.Context context) {
+        return (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
 }
