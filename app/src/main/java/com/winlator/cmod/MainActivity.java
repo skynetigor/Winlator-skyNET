@@ -465,6 +465,34 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         }
     }
 
+    /** The container comes first: its type decides what can be added (a .exe for Wine, a Linux program otherwise). */
+    public void chooseContainerForNewShortcut() {
+        java.util.ArrayList<com.winlator.cmod.container.Container> containers = new ContainerManager(this).getContainers();
+        if (containers == null || containers.isEmpty()) {
+            android.widget.Toast.makeText(this, "Create a container first!", android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[containers.size()];
+        for (int i = 0; i < names.length; i++) {
+            com.winlator.cmod.container.Container container = containers.get(i);
+            names[i] = container.getName() + (container.isLinux() ? "  (Linux)" : "  (Windows)");
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Add shortcut to")
+                .setItems(names, (dialog, which) -> {
+                    com.winlator.cmod.container.Container container = containers.get(which);
+                    Fragment target = container.isLinux()
+                            ? com.winlator.cmod.ui.container.LinuxProgramsFragment.forContainer(container.id, true)
+                            : FileManagerFragment.forContainer(container.id);
+                    getSupportFragmentManager().beginTransaction()
+                            .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
+                            .addToBackStack(null)
+                            .replace(R.id.FLFragmentContainer, target)
+                            .commit();
+                })
+                .show();
+    }
+
     private void show(Fragment fragment, boolean reverse) {
         FragmentManager fragmentManager = getSupportFragmentManager();
         if (reverse) {

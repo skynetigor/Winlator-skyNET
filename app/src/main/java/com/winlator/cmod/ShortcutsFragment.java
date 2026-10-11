@@ -271,7 +271,7 @@ public class ShortcutsFragment extends Fragment {
         });
         searchItem.setActionView(searchView);
 
-        MenuItem addItem = menu.add(0, MENU_FILE_MANAGER, 2, "Open File Manager");
+        MenuItem addItem = menu.add(0, MENU_FILE_MANAGER, 2, "Add shortcut");
         addItem.setIcon(R.drawable.ui_ic_add);
         addItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
 
@@ -301,11 +301,7 @@ public class ShortcutsFragment extends Fragment {
             return true;
         }
         if (item.getItemId() == MENU_FILE_MANAGER) {
-            getParentFragmentManager().beginTransaction()
-                    .setCustomAnimations(R.anim.slide_in_up, R.anim.slide_out_down)
-                    .addToBackStack(null)
-                    .replace(R.id.FLFragmentContainer, new FileManagerFragment())
-                    .commit();
+            ((MainActivity) requireActivity()).chooseContainerForNewShortcut();
             return true;
         }
         MainActivity activity = (MainActivity) requireActivity();

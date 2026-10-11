@@ -45,6 +45,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,10 +75,18 @@ import java.util.concurrent.Executors
 class LinuxProgramsFragment : Fragment() {
     companion object {
         private const val ARG_CONTAINER_ID = "container_id"
+        private const val ARG_PICK_ON_OPEN = "pick_on_open"
 
         @JvmStatic
-        fun forContainer(containerId: Int): LinuxProgramsFragment = LinuxProgramsFragment().apply {
-            arguments = Bundle().apply { putInt(ARG_CONTAINER_ID, containerId) }
+        fun forContainer(containerId: Int): LinuxProgramsFragment = forContainer(containerId, false)
+
+        /** With [pickOnOpen] the storage picker opens at once, for a caller that already knows a program is to be added. */
+        @JvmStatic
+        fun forContainer(containerId: Int, pickOnOpen: Boolean): LinuxProgramsFragment = LinuxProgramsFragment().apply {
+            arguments = Bundle().apply {
+                putInt(ARG_CONTAINER_ID, containerId)
+                putBoolean(ARG_PICK_ON_OPEN, pickOnOpen)
+            }
         }
     }
 
@@ -86,10 +96,11 @@ class LinuxProgramsFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View = ComposeView(requireContext()).apply {
         val containerId = arguments?.getInt(ARG_CONTAINER_ID, -1) ?: -1
+        val pickOnOpen = savedInstanceState == null && arguments?.getBoolean(ARG_PICK_ON_OPEN, false) == true
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         setContent {
             WinZTheme {
-                LinuxProgramsScreen(containerId) { parentFragmentManager.popBackStack() }
+                LinuxProgramsScreen(containerId, pickOnOpen) { parentFragmentManager.popBackStack() }
             }
         }
     }
@@ -136,7 +147,7 @@ private fun formatSize(bytes: Long): String =
     else "${bytes shr 20} MB"
 
 @Composable
-private fun LinuxProgramsScreen(containerId: Int, onBack: () -> Unit) {
+private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: () -> Unit) {
     val context = LocalContext.current
     val container = remember { ContainerManager(context).getContainerById(containerId) }
     if (container == null) {
@@ -173,6 +184,15 @@ private fun LinuxProgramsScreen(containerId: Int, onBack: () -> Unit) {
             ).show()
             return@rememberLauncherForActivityResult
         }
+        // A Linux container runs ELF programs and shared objects (.so is ELF too) and shell scripts, never a .exe.
+        if (LinuxSession.elfMachine(file) == -1 && !file.name.endsWith(".sh")) {
+            Toast.makeText(
+                context,
+                "Not a Linux program: pick an ELF executable, a .so or a .sh script.",
+                Toast.LENGTH_LONG
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
         if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) != LinuxEmulator.NONE) {
             // An x86-64 program is read by the emulator, not run by the kernel, so it can stay on shared storage.
             ContainerManager.addLinuxShortcut(container, file.nameWithoutExtension, file.path)
@@ -182,6 +202,14 @@ private fun LinuxProgramsScreen(containerId: Int, onBack: () -> Unit) {
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.
         pendingCopySize = directorySize(file.parentFile ?: file)
         pendingCopy = file
+    }
+
+    var autoPicked by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (pickOnOpen && !autoPicked) {
+            autoPicked = true
+            picker.launch(arrayOf("*/*"))
+        }
     }
 
     Scaffold(

@@ -92,6 +92,15 @@ public class FileManagerFragment extends Fragment {
         void onContainerSelected(Container container);
     }
 
+    /** A file manager whose "run" and "add shortcut" actions go to the given Wine container without asking. */
+    public static FileManagerFragment forContainer(int containerId) {
+        FileManagerFragment fragment = new FileManagerFragment();
+        Bundle args = new Bundle();
+        args.putInt("container_id", containerId);
+        fragment.setArguments(args);
+        return fragment;
+    }
+
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -604,6 +613,14 @@ public class FileManagerFragment extends Fragment {
         if (containers == null || containers.isEmpty()) {
             Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
             return;
+        }
+
+        int chosenId = getArguments() != null ? getArguments().getInt("container_id", -1) : -1;
+        for (Container candidate : containers) {
+            if (candidate.id == chosenId) {
+                action.onContainerSelected(candidate);
+                return;
+            }
         }
 
         if (containers.size() == 1) {

@@ -60,7 +60,7 @@ internal fun LibraryRootWithoutEmptyDescription(
         }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Surface(
-                onClick = { activity?.navigateToMainDestination(R.id.main_menu_file_manager) },
+                onClick = { activity?.chooseContainerForNewShortcut() },
                 modifier = Modifier.fillMaxWidth(0.90f).widthIn(max = 320.dp),
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surface,
