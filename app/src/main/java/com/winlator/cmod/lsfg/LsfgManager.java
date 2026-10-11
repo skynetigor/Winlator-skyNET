@@ -21,6 +21,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -67,13 +68,33 @@ public final class LsfgManager {
 
     /** Relative to the container root, which is what $HOME points to inside the guest. */
     private static final String CONFIG_FILE = ".config/lsfg-vk/conf.toml";
-    private static final String VSYNC_FILE = ".config/lsfg-vk/vsync.txt";
     private static final String LEGACY_DLL_FILE = ".local/share/lsfg-vk/Lossless.dll";
     /** Under the app's files dir (not the imagefs) so it survives imagefs reinstalls. */
     private static final String GLOBAL_DLL_FILE = "lsfg-vk/Lossless.dll";
 
     /** Under Wine /proc/self/exe is the Wine loader, so the [[game]] profile matches this instead. */
     private static final String PROCESS_ID = "winlator-lsfg";
+
+    /**
+     * Linux containers: the layer is a glibc aarch64 build (tools/lsfg-linux), shipped as an asset and installed
+     * under the app's files, which the proot session sees at the same path. Bump when the binary changes.
+     */
+    private static final String LINUX_RUNTIME_VERSION = "lsfg-vk-android v1.0.4-android, linux-arm64 glibc build 2 (single device)";
+    private static final String LINUX_ASSET_LIBRARY = "lsfg_vk/linux-arm64/liblsfg-vk.so";
+    private static final String LINUX_LAYER_DIR = "linux-lsfg/layer";
+
+    /**
+     * Where conf.toml (and vsync.txt, which the layer looks for beside it) live. The layer reads them by this
+     * absolute path (LSFG_CONFIG). A Linux container's home is its linux-home folder, not the container root.
+     */
+    private static File configFile(Container container) {
+        File home = container.isLinux() ? container.getLinuxHomeDir() : container.getRootDir();
+        return new File(home, CONFIG_FILE);
+    }
+
+    private static File vsyncFile(Container container) {
+        return new File(configFile(container).getParentFile(), "vsync.txt");
+    }
 
     private LsfgManager() {}
 
@@ -305,7 +326,7 @@ public final class LsfgManager {
         if (!ensureRuntimeInstalled(context, layerDir)) return false;
         if (!writeConfig(context, container, getMultiplier(container))) return false;
 
-        envVars.put("LSFG_CONFIG", new File(container.getRootDir(), CONFIG_FILE).getAbsolutePath());
+        envVars.put("LSFG_CONFIG", configFile(container).getAbsolutePath());
         envVars.put("LSFG_PROCESS", PROCESS_ID);
 
         String implicitPath = envVars.get("VK_ADD_IMPLICIT_LAYER_PATH");
@@ -315,6 +336,89 @@ public final class LsfgManager {
         Log.i(TAG, String.format(Locale.US, "LSFG armed: multiplier=%d flowScale=%s performance=%b presentMode=%s",
                 getMultiplier(container), formatFlowScale(getFlowScale(context, container)),
                 isPerformanceMode(context, container), getPresentMode(context, container)));
+        return true;
+    }
+
+    /**
+     * The same as {@link #prepareLaunch} for a Linux container: installs the glibc build of the layer, writes
+     * conf.toml and adds the layer and its settings to the session's environment.
+     *
+     * The layer is loaded by the guest's own (native) Vulkan loader, so it works under an emulated program too:
+     * Box64 hands the program's Vulkan calls to that loader. It needs the dma-buf ("native") output to pay off:
+     * each generated frame is one more Present, and with the CPU-copy output each of them is a copy on the CPU.
+     *
+     * @return true if the layer will be loaded
+     */
+    public static boolean prepareLinuxLaunch(Context context, Container container, Map<String, String> env) {
+        if (!isArmed(context, container)) {
+            if (getMultiplier(container) >= 2) Log.w(TAG, "LSFG multiplier set but no Lossless.dll imported; skipping");
+            return false;
+        }
+
+        File layerDir = new File(context.getFilesDir(), LINUX_LAYER_DIR);
+        if (!ensureLinuxRuntimeInstalled(context, layerDir)) return false;
+        if (!writeConfig(context, container, getMultiplier(container))) return false;
+
+        env.put("LSFG_CONFIG", configFile(container).getAbsolutePath());
+        env.put("LSFG_PROCESS", PROCESS_ID);
+        // Mesa's device-select layer (an implicit layer of the runtime, for machines with several GPUs) sits below
+        // this one and crashes when the frame generation asks it for an entry point with a null instance, which is
+        // how its Vulkan loader library is initialised. The phone has one GPU, so there is nothing to select.
+        env.put("NODEVICE_SELECT", "1");
+        String implicitPath = env.get("VK_ADD_IMPLICIT_LAYER_PATH");
+        String layerPath = layerDir.getAbsolutePath();
+        env.put("VK_ADD_IMPLICIT_LAYER_PATH", implicitPath == null || implicitPath.isEmpty() ? layerPath : implicitPath + ":" + layerPath);
+
+        Log.i(TAG, String.format(Locale.US, "LSFG armed (Linux): multiplier=%d flowScale=%s performance=%b presentMode=%s",
+                getMultiplier(container), formatFlowScale(getFlowScale(context, container)),
+                isPerformanceMode(context, container), getPresentMode(context, container)));
+        return true;
+    }
+
+    private static boolean ensureLinuxRuntimeInstalled(Context context, File layerDir) {
+        File library = new File(layerDir, LAYER_LIBRARY);
+        File manifest = new File(layerDir, LAYER_MANIFEST);
+        File version = new File(layerDir, VERSION_FILE);
+
+        if (library.isFile() && manifest.isFile() && version.isFile()
+                && LINUX_RUNTIME_VERSION.equals(FileUtils.readString(version).trim())) {
+            return true;
+        }
+        if (!layerDir.isDirectory() && !layerDir.mkdirs()) {
+            Log.e(TAG, "Unable to create " + layerDir);
+            return false;
+        }
+
+        File tmp = new File(layerDir, LAYER_LIBRARY + ".tmp");
+        try (InputStream in = context.getAssets().open(LINUX_ASSET_LIBRARY);
+             java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+        }
+        catch (IOException e) {
+            Log.e(TAG, "Unable to install the Linux layer from " + LINUX_ASSET_LIBRARY, e);
+            tmp.delete();
+            return false;
+        }
+        if (!tmp.renameTo(library)) {
+            tmp.delete();
+            return false;
+        }
+        FileUtils.chmod(library, 0755);
+
+        String manifestText = FileUtils.readString(context, ASSET_MANIFEST);
+        if (manifestText == null || manifestText.isEmpty()) {
+            Log.e(TAG, "Unable to read asset " + ASSET_MANIFEST);
+            return false;
+        }
+        manifestText = manifestText.replaceFirst("\"library_path\"\\s*:\\s*\"[^\"]*\"",
+                "\"library_path\": \"" + library.getAbsolutePath() + "\"");
+        if (!FileUtils.writeString(manifest, manifestText) || !FileUtils.writeString(version, LINUX_RUNTIME_VERSION)) {
+            Log.e(TAG, "Unable to write the layer manifest");
+            return false;
+        }
+        Log.i(TAG, "Installed " + LINUX_RUNTIME_VERSION + " into " + layerDir);
         return true;
     }
 
@@ -378,7 +482,7 @@ public final class LsfgManager {
         toml.append("fps_limit = 0\n");
         toml.append("experimental_present_mode = ").append(tomlString(getPresentMode(context, container))).append('\n');
 
-        return writeAtomic(new File(container.getRootDir(), CONFIG_FILE), toml.toString());
+        return writeAtomic(configFile(container), toml.toString());
     }
 
     /** In-game "off": layer stays loaded, frames pass through unmodified. */
@@ -423,7 +527,7 @@ public final class LsfgManager {
         stopVsyncClock();
         if (!isArmed(context, container)) return;
 
-        final File file = new File(container.getRootDir(), VSYNC_FILE);
+        final File file = vsyncFile(container);
         final WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
         final Handler handler = new Handler(Looper.getMainLooper());
         vsyncHandler = handler;

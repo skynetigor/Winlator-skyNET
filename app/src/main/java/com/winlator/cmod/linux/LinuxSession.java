@@ -261,6 +261,9 @@ public final class LinuxSession {
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
 
+        // Frame generation (Lossless Scaling through lsfg-vk): a Vulkan layer the guest's loader picks up.
+        com.winlator.cmod.lsfg.LsfgManager.prepareLinuxLaunch(context, container, env);
+
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
         if (emulator != null && emulator.emulator.equals(LinuxEmulator.BOX64)) {
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.

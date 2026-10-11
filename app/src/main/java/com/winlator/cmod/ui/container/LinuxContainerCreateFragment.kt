@@ -461,6 +461,16 @@ private fun LinuxContainerEditor(
                 ) { upscaler = it }
             }
 
+            SectionTitle("Frame generation")
+            // The multiplier and its overrides are saved on the container as they are changed, so there has to be one.
+            editing?.let { ContainerLsfgCard(it) } ?: ContainerLsfgUnavailableCard()
+            Text(
+                "Works with native output only (turn off \"Software Vulkan output\"): each generated frame is one more " +
+                    "frame to show, and the CPU copy cannot keep up with that. Import Lossless.dll under Settings > Components.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             SectionTitle("Environment variables")
             EnvironmentVariablesEditor(value = envVars, onChanged = { envVars = it })
 
