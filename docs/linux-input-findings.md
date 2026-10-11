@@ -77,6 +77,13 @@ client on the same server receives them normally.
 So the question is no longer "why does SDL ignore our events" but "why do our core events never arrive on
 SDL's connection, while our XI2 events on the same connection do".
 
+Worth knowing before re-deriving it: the `XOut` trace is written in `XOutputStream.traceOutput()`,
+immediately before `clientSocket.write(buffer)`. "The server sent a ButtonPress" is therefore the bytes
+having been written to that client's socket, not an inference from the code path. Both kinds of event take
+the same route to the socket (`event.send(sequence, stream)` under the stream lock, from `XClient.sendEvent`
+for XI2 and `EventListener.sendEvent` for core), and `FocusEvent` and `KeymapNotify` are each exactly the
+32 bytes the protocol wants, so a desynchronised stream is ruled out too.
+
 Ruled out so far: the window id; the input method (`XMODIFIERS=@im=none` changes nothing);
 `XIPassiveGrabDevice`, which this SDL never uses, so the handler written for it in `XInput2Extension` is
 dead code.
