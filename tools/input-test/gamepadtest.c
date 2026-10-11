@@ -169,7 +169,7 @@ int main(void) {
             if (type == 0x100) running = 0;                       /* SDL_QUIT */
             else if (type == 0x300) {                             /* SDL_KEYDOWN */
                 int32_t scancode;
-                memcpy(&scancode, buffer + 20, 4);
+                memcpy(&scancode, buffer + 16, 4);                /* SDL_Keysym.scancode */
                 if (scancode == 41) running = 0;                  /* Escape */
             }
             else if (type == 0x605 || type == 0x606 || type == 0x653 || type == 0x654) {

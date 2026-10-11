@@ -648,6 +648,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onMapWindow(Window window) {
                 assignTaskAffinity(window);
+                // No window manager runs in a Linux session, so nothing would hand the keyboard to a window that
+                // has just opened. A toolkit waits to be told: SDL keeps no keyboard focus and drops every key,
+                // and only a program that asks for the focus itself (BeamNG does) ever gets one. So the server
+                // gives it, the way a window manager would.
+                if (linuxSession && window.isMappedTopLevel()) {
+                    xServer.windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
+                }
             }
 
             @Override

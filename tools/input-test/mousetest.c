@@ -159,6 +159,7 @@ int main(void) {
     int lastRelX = 0, lastRelY = 0;
     int wheelX = 0, wheelY = 0;
     int motions = 0;
+    int keys = 0, lastScancode = 0, lastMod = 0;
     int hasPointer = 0, hasKeyboard = 0;
 
     char buffer[256];
@@ -168,10 +169,16 @@ int main(void) {
             uint32_t type;
             memcpy(&type, buffer, 4);
             if (type == 0x100) running = 0;                            /* SDL_QUIT */
-            else if (type == 0x300) {                                  /* SDL_KEYDOWN */
-                int32_t scancode;
-                memcpy(&scancode, buffer + 20, 4);
-                if (scancode == 41) running = 0;                       /* Escape */
+            else if (type == 0x300 || type == 0x301) {                 /* SDL_KEY{DOWN,UP} */
+                int32_t scancode, sym;
+                uint16_t mod;
+                memcpy(&scancode, buffer + 16, 4);                     /* SDL_Keysym.scancode */
+                memcpy(&sym, buffer + 20, 4);
+                memcpy(&mod, buffer + 24, 2);
+                if (type == 0x300) { lastScancode = scancode; lastMod = mod; keys++; }
+                printf("key %s scancode=%d sym=%d mod=0x%x\n",
+                       type == 0x300 ? "down" : "up  ", scancode, sym, mod);
+                if (type == 0x300 && scancode == 41 && mod == 0) running = 0;   /* Escape */
             }
             else if (type == 0x400) {                                  /* SDL_MOUSEMOTION */
                 int32_t x, y, xrel, yrel;
@@ -205,6 +212,9 @@ int main(void) {
                 else if (what == 11) { hasPointer = 0; printf("pointer left\n"); }
                 else if (what == 12) { hasKeyboard = 1; printf("focus gained\n"); }
                 else if (what == 13) { hasKeyboard = 0; printf("focus lost\n"); }
+            }
+            else if (type != 0x400 && type != 0x200) {
+                printf("other event 0x%x\n", type);   /* anything not handled above, motion aside */
             }
         }
 
@@ -250,6 +260,11 @@ int main(void) {
         number(1240, 645, 18, 30, 5, 4, wheelY);
         colour(0x55, 0x60, 0x72);
         number(1000, 645, 14, 22, 4, 5, motions);
+        /* The keyboard: how many keys have arrived, the last one's scancode, and the modifiers with it. */
+        colour(0xc9, 0x8a, 0xf5);
+        number(1000, 600, 14, 22, 4, 4, keys);
+        number(820, 600, 14, 22, 4, 3, lastScancode);
+        number(820, 645, 14, 22, 4, 4, lastMod);
 
         SDL_RenderPresent(renderer);
         SDL_Delay(16);

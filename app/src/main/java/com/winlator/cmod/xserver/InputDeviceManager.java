@@ -58,21 +58,14 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
         }
     }
 
-    private void sendFocusIn(Window window) {
-        window.sendEvent(Event.FOCUS_CHANGE, new FocusEvent(true, FocusEvent.DETAIL_NONLINEAR, window, FocusEvent.MODE_NORMAL));
-        window.sendEvent(Event.KEYMAP_STATE, new com.winlator.cmod.xserver.events.KeymapNotify());
-        XInput2Extension xi2 = xi2();
-        if (xi2 != null) xi2.onFocus(true, window);
-    }
-
     private java.util.concurrent.ScheduledExecutorService focusExecutor;
 
     /**
-     * A window takes the focus the moment it is mapped, which for a program with a loading screen is long before the
-     * part that reacts to focus exists: BeamNG hands its window to an embedded Chromium that is not built yet, so the
-     * menu it later draws highlights under the pointer but never takes a click. The focus is announced again over the
-     * following half minute, so whatever is listening by then hears it. A repeat is harmless to a program that is
-     * already focused.
+     * The focus is handed to a window the moment it is mapped, which is a moment too early: a program maps its
+     * window and asks for focus events in whichever order its toolkit likes, and SDL's ask lands second, so the
+     * one announcement it needed went to nobody. Measured on the device: without this, an SDL program never sees
+     * it gain the focus, and SDL drops every key. So it is said again over the next seconds, and a repeat does no
+     * harm to a program that heard the first one.
      */
     private void repeatFocusIn(final Window window) {
         if (focusExecutor == null) {
@@ -82,7 +75,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
                 return thread;
             });
         }
-        for (int delay : new int[]{500, 2000, 5000, 10000, 20000, 30000}) {
+        for (int delay : new int[]{200, 600, 1500, 4000}) {
             focusExecutor.schedule(() -> {
                 try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
                     // Only while it still holds the focus: a later window of its own must not be talked over.
@@ -91,6 +84,13 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
                 }
             }, delay, java.util.concurrent.TimeUnit.MILLISECONDS);
         }
+    }
+
+    private void sendFocusIn(Window window) {
+        window.sendEvent(Event.FOCUS_CHANGE, new FocusEvent(true, FocusEvent.DETAIL_NONLINEAR, window, FocusEvent.MODE_NORMAL));
+        window.sendEvent(Event.KEYMAP_STATE, new com.winlator.cmod.xserver.events.KeymapNotify());
+        XInput2Extension xi2 = xi2();
+        if (xi2 != null) xi2.onFocus(true, window);
     }
 
     @Override
