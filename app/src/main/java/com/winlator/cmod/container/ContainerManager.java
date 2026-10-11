@@ -80,6 +80,8 @@ public class ContainerManager {
                             container.loadData(data);
                             containers.add(container);
                             maxContainerId = Math.max(maxContainerId, container.id);
+                            // The app's own gamepad tester, so a Linux container can always be checked.
+                            com.winlator.cmod.linux.LinuxTestPrograms.ensure(context, container);
                         }
                     }
                 }

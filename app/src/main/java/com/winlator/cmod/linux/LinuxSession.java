@@ -342,7 +342,12 @@ public final class LinuxSession {
     }
 
     private static File stageAsset(Context context, String name) {
-        File dir = new File(context.getFilesDir(), "linux-shim");
+        return stageAsset(context, "linux-shim", name);
+    }
+
+    /** Copies one of the app's own Linux binaries out of the APK into files/{@code dirName}. */
+    static File stageAsset(Context context, String dirName, String name) {
+        File dir = new File(context.getFilesDir(), dirName);
         File shim = new File(dir, name);
         try (java.io.InputStream in = context.getAssets().open("linux/" + name)) {
             byte[] data = in.readAllBytes();

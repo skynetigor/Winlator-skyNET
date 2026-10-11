@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Gamepad Test
+Exec=/root/gamepadtest
+Type=Application
+container_id:6
+
+[Extra Data]
+controlsProfile=3
