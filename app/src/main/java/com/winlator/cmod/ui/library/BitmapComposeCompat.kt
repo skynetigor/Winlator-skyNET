@@ -168,9 +168,11 @@ internal fun LibraryRoot(
                     )
                 }
             } else {
+                val context = LocalContext.current
+                val hasContainers = rememberHasContainers()
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Surface(
-                        onClick = { activity?.chooseContainerForNewShortcut() },
+                        onClick = { addGamesOrContainer(activity, context, hasContainers) },
                         modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surface,
@@ -188,7 +190,7 @@ internal fun LibraryRoot(
                                 Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Add, null, modifier = Modifier.size(34.dp)) }
                             }
                             Spacer(Modifier.height(16.dp))
-                            Text("Add games", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text(if (hasContainers) "Add games" else "Add container", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

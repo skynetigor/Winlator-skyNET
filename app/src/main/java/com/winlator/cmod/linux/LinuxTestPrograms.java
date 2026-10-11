@@ -15,6 +15,9 @@ import java.io.File;
  *
  * Each comes in two builds: the native one tests the container, and the x86-64 one tests the same input as seen
  * by a program under Box64, which is where a game like BeamNG reads it.
+ *
+ * They are for development: the binaries live in src/debug/assets, so a release build does not carry them, and
+ * nothing here runs unless the app is debuggable.
  */
 public final class LinuxTestPrograms {
     private static final String TOOLS_DIR = "linux-tools";
@@ -25,9 +28,14 @@ public final class LinuxTestPrograms {
 
     private LinuxTestPrograms() {}
 
+    /** True in a debug build only; a release build has neither the testers nor the demo shortcuts. */
+    public static boolean enabled(Context context) {
+        return (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
     /** Puts the testers where the session can reach them and gives the container a shortcut for each. */
     public static void ensure(Context context, Container container) {
-        if (container == null || !container.isLinux()) return;
+        if (container == null || !container.isLinux() || !enabled(context)) return;
         addShortcut(context, container, "Gamepad test", GAMEPAD_TEST);
         addShortcut(context, container, "Gamepad test (x86-64)", GAMEPAD_TEST_X64);
         addShortcut(context, container, "Mouse test", MOUSE_TEST);

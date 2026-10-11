@@ -38,6 +38,45 @@ public class XClientRequestHandler implements RequestHandler {
     /** Log every request (client, sequence number, opcode) to logcat tag XTrace; for finding what a program waits on. */
     public static volatile boolean trace = false;
 
+    /** Count and time every request, and log a summary every few seconds (logcat tag XStats); cheap enough to leave on. */
+    public static volatile boolean stats = false;
+    private static final java.util.HashMap<Integer, long[]> statTable = new java.util.HashMap<>();
+    private static long statSince = 0;
+
+    private static void recordStat(int opcode, int data, int bytes, long nanos) {
+        // Extension requests are told apart by their minor opcode; core ones by the opcode alone.
+        int key = opcode < 0 ? ((opcode & 0xff) << 8) | (data & 0xff) : (opcode & 0xff) << 8;
+        long now = System.nanoTime();
+        String report = null;
+        synchronized (statTable) {
+            long[] row = statTable.get(key);
+            if (row == null) statTable.put(key, row = new long[3]);
+            row[0]++;
+            row[1] += bytes;
+            row[2] += nanos;
+            if (statSince == 0) statSince = now;
+            if (now - statSince >= 5_000_000_000L) {
+                StringBuilder sb = new StringBuilder("per second over ").append((now - statSince) / 1_000_000).append(" ms:");
+                double seconds = (now - statSince) / 1e9;
+                java.util.ArrayList<java.util.Map.Entry<Integer, long[]>> rows = new java.util.ArrayList<>(statTable.entrySet());
+                rows.sort((a, b) -> Long.compare(b.getValue()[2], a.getValue()[2]));
+                for (int i = 0; i < Math.min(8, rows.size()); i++) {
+                    java.util.Map.Entry<Integer, long[]> e = rows.get(i);
+                    int op = e.getKey() >> 8, minor = e.getKey() & 0xff;
+                    long[] v = e.getValue();
+                    sb.append("\n  op=").append(op).append(op >= 128 ? "/" + minor : "")
+                            .append(" n=").append(Math.round(v[0] / seconds))
+                            .append(" KB=").append(Math.round(v[1] / 1024.0 / seconds))
+                            .append(" busy=").append(Math.round(v[2] / 1e7 / seconds)).append("% of a core");
+                }
+                report = sb.toString();
+                statTable.clear();
+                statSince = now;
+            }
+        }
+        if (report != null) Log.d("XStats", report);
+    }
+
     @Override
     public boolean handleRequest(Client client) throws IOException {
         XClient xClient = (XClient)client.getTag();
@@ -188,6 +227,7 @@ public class XClientRequestHandler implements RequestHandler {
                     + " op=" + (opcode & 0xff) + " data=" + (requestData & 0xff) + " len=" + requestLength);
         }
 
+        final long statStart = stats ? System.nanoTime() : 0;
         try {
             switch (opcode) {
                 case ClientOpcodes.CREATE_WINDOW:
@@ -506,6 +546,7 @@ public class XClientRequestHandler implements RequestHandler {
             e.sendError(client, opcode);
         }
 
+        if (stats) recordStat(opcode, requestData, requestLength, System.nanoTime() - statStart);
         return true;
     }
 }

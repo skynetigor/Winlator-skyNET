@@ -21,6 +21,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import android.content.Context
+import android.content.Intent
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.winlator.cmod.container.ContainerManager
+import com.winlator.cmod.ui.settings.ContainersSettingsActivity
 import androidx.compose.runtime.MutableState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +56,8 @@ internal fun LibraryRootWithoutEmptyDescription(
     }
 
     val activity = LocalContext.current as? MainActivity
+    val context = LocalContext.current
+    val hasContainers = rememberHasContainers()
     Column(
         Modifier
             .fillMaxSize()
@@ -60,7 +74,7 @@ internal fun LibraryRootWithoutEmptyDescription(
         }
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Surface(
-                onClick = { activity?.chooseContainerForNewShortcut() },
+                onClick = { addGamesOrContainer(activity, context, hasContainers) },
                 modifier = Modifier.fillMaxWidth(0.90f).widthIn(max = 320.dp),
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surface,
@@ -81,7 +95,7 @@ internal fun LibraryRootWithoutEmptyDescription(
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        "Add games",
+                        if (hasContainers) "Add games" else "Add container",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -104,4 +118,27 @@ private fun EmptyFilterChip(label: String, selected: Boolean) {
             style = MaterialTheme.typography.labelLarge
         )
     }
+}
+
+
+/** Whether any container exists; re-read when the screen comes back from the containers screen. */
+@Composable
+internal fun rememberHasContainers(): Boolean {
+    val context = LocalContext.current
+    var has by remember { mutableStateOf(ContainerManager(context).containers.isNotEmpty()) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) has = ContainerManager(context).containers.isNotEmpty()
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    return has
+}
+
+/** With no container there is nowhere to add a game to, so the empty library offers to create one. */
+internal fun addGamesOrContainer(activity: MainActivity?, context: Context, hasContainers: Boolean) {
+    if (hasContainers) activity?.chooseContainerForNewShortcut()
+    else context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
 }

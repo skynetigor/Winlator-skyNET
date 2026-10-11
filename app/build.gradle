@@ -102,6 +102,7 @@ android {
         // Side-by-side install: keeps the upstream Ludashi build and its containers intact.
         // namespace stays com.winlator.cmod so relative manifest class names still resolve.
         applicationId "com.winlator.cmod.dev"
+        manifestPlaceholders = [appLabel: "Winlator skyNET"]
         minSdkVersion 28
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
@@ -134,10 +135,15 @@ android {
         freeCompilerArgs += ['-opt-in=androidx.compose.material3.ExperimentalMaterial3Api']
     }
 
+    // The debug build is a separate app (com.winlator.cmod.dev2) next to the release build.
+    // A suffix cannot do this: it always adds a dot, and a package segment cannot start with a digit.
+
     // Keep Winlator’s buildTypes
     buildTypes {
         debug {
             minifyEnabled false
+            // A separate app next to the release build: its own package, so no data or signature is shared.
+            manifestPlaceholders = [appLabel: "skyNET Debug"]
         }
         release {
             minifyEnabled false
@@ -202,4 +208,10 @@ dependencies {
     implementation 'com.kohlschutter.junixsocket:junixsocket-common:2.6.0'
     implementation 'com.kohlschutter.junixsocket:junixsocket-native-common:2.6.0'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.11.0'
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.applicationId.set("com.winlator.cmod.dev2")
+    }
 }

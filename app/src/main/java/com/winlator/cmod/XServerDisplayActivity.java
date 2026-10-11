@@ -622,7 +622,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             @Override
             public void onUpdateWindowContent(Window window) {
                 if (!winStarted[0] && isSessionApplicationWindow(window)) {
-                    if (!simulateTouchScreen) {
+                    if (!simulateTouchScreen && !preferences.getBoolean("touchscreen_toggle", false)) {
+                        // A finger is its own pointer, in either direct-touch mode: no cursor to draw.
                         xServerView.setCursorVisible(true);
                     }
                     preloaderDialog.closeOnUiThread();
@@ -1296,6 +1297,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // A file named .xtrace in the container's home turns on logging of every X request (logcat tag XTrace).
         XClientRequestHandler.trace = new File(container.getLinuxHomeDir(), ".xtrace").exists();
+        // A file named .xstats turns on a summary every few seconds of what the X server is asked to do and how long it takes (tag XStats).
+        XClientRequestHandler.stats = new File(container.getLinuxHomeDir(), ".xstats").exists();
 
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(

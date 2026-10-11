@@ -292,6 +292,10 @@ public final class LinuxSession {
         java.util.List<String> extraLibs = new ArrayList<>();
         File containerLibs = new File(container.getLinuxHomeDir(), "hostlibs");
         if (containerLibs.isDirectory()) extraLibs.add("/root/hostlibs");
+        // libXss (X screensaver): Box64 wraps it, the runtime does not ship it, and a game with an embedded
+        // Chromium (CEF) needs it to start. Arch Linux ARM's libxss 1.2.5, taken from the package unchanged.
+        File xss = stageAsset(context, "libXss.so.1");
+        if (xss != null) extraLibs.add(xss.getParent());
         if (emulator != null && new File(emulator.dir, "lib/host").isDirectory()) {
             extraLibs.add(new File(emulator.dir, "lib/host").getPath());
         }

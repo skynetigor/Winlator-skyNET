@@ -278,6 +278,13 @@ public class Window extends XResource {
     }
 
     public void sendEvent(int eventId, Event event) {
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            StringBuilder to = new StringBuilder();
+            for (EventListener eventListener : eventListeners) {
+                to.append(eventListener.client.resourceIDBase).append(eventListener.isInterestedIn(eventId) ? "+" : "-").append(' ');
+            }
+            android.util.Log.d("XTrace", "window " + id + " event id " + eventId + " listeners: " + to);
+        }
         for (EventListener eventListener : eventListeners) {
             if (eventListener.isInterestedIn(eventId)) {
                 eventListener.sendEvent(event);

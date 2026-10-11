@@ -773,6 +773,10 @@ public class GLXExtension implements Extension {
 
     @Override
     public byte getFirstEventId() {
-        return 0;
+        // libGL tells Xlib that GLX owns the 17 event codes from here, and Xlib then hands every one of them to GLX's
+        // wire-to-event converter, which drops what it does not know. Reporting 0 gave GLX the core events 0..16:
+        // a program that loaded libGL (SDL does, for its OpenGL support) never got another KeyPress, ButtonPress,
+        // Enter or FocusIn. 111..127 is the one run of 17 codes the other extensions leave free.
+        return 111;
     }
 }

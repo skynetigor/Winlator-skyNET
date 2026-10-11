@@ -80,7 +80,7 @@ public class ContainerManager {
                             container.loadData(data);
                             containers.add(container);
                             maxContainerId = Math.max(maxContainerId, container.id);
-                            // The app's own gamepad tester, so a Linux container can always be checked.
+                            // The app's own input testers (debug builds only), so a Linux container can always be checked.
                             com.winlator.cmod.linux.LinuxTestPrograms.ensure(context, container);
                         }
                     }
@@ -163,7 +163,7 @@ public class ContainerManager {
                 FileUtils.delete(containerDir);
                 return null;
             }
-            addLinuxTestPrograms(container);
+            if (com.winlator.cmod.linux.LinuxTestPrograms.enabled(context)) addLinuxTestPrograms(container);
 
             container.saveData();
             maxContainerId = Math.max(maxContainerId, id);
@@ -175,7 +175,7 @@ public class ContainerManager {
         return null;
     }
 
-    /** Programs that ship with the runtime, so a new Linux container has something to start. */
+    /** Demo programs of the runtime, for checking a new Linux container; debug builds only. */
     private void addLinuxTestPrograms(Container container) {
         addLinuxShortcut(container, "glxgears", "/usr/bin/glxgears");
         addLinuxShortcut(container, "vkcube", "/usr/bin/vkcube");

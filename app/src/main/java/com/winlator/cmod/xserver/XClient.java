@@ -41,6 +41,9 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
     }
 
     public void setEventListenerForWindow(Window window, Bitmask eventMask) {
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            android.util.Log.d("XTrace", "event mask client=" + resourceIDBase + " window=" + window.id + " mask=0x" + Integer.toHexString(eventMask.getBits()));
+        }
         EventListener eventListener = eventListeners.get(window);
         if (eventListener != null) window.removeEventListener(eventListener);
         if (eventMask.isEmpty()) return;
