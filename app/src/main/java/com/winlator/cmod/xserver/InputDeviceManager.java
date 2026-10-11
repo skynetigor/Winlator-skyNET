@@ -53,40 +53,41 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             xi2.onFocus(false, oldFocus);
         }
         if (newFocus != null && newFocus != xServer.windowManager.rootWindow && newFocus.attributes.isEnabled()) {
-            newFocus.sendEvent(Event.FOCUS_CHANGE, new FocusEvent(true, FocusEvent.DETAIL_NONLINEAR, newFocus, FocusEvent.MODE_NORMAL));
-            newFocus.sendEvent(Event.KEYMAP_STATE, new com.winlator.cmod.xserver.events.KeymapNotify());
-            xi2.onFocus(true, newFocus);
+            sendFocusIn(newFocus);
+            repeatFocusIn(newFocus);
         }
     }
 
-    private java.util.concurrent.ScheduledExecutorService replayExecutor;
+    private void sendFocusIn(Window window) {
+        window.sendEvent(Event.FOCUS_CHANGE, new FocusEvent(true, FocusEvent.DETAIL_NONLINEAR, window, FocusEvent.MODE_NORMAL));
+        window.sendEvent(Event.KEYMAP_STATE, new com.winlator.cmod.xserver.events.KeymapNotify());
+        XInput2Extension xi2 = xi2();
+        if (xi2 != null) xi2.onFocus(true, window);
+    }
+
+    private java.util.concurrent.ScheduledExecutorService focusExecutor;
 
     /**
-     * A window manager tells a program it has focus (FocusIn, Enter, Expose) once the window is up and the program is
-     * reading events. Sent only at the instant of mapping, SDL drops them, and then ignores every click and key because it
-     * thinks it has no focus. So the same events are repeated a few times over the next seconds.
+     * A window takes the focus the moment it is mapped, which for a program with a loading screen is long before the
+     * part that reacts to focus exists: BeamNG hands its window to an embedded Chromium that is not built yet, so the
+     * menu it later draws highlights under the pointer but never takes a click. The focus is announced again over the
+     * following half minute, so whatever is listening by then hears it. A repeat is harmless to a program that is
+     * already focused.
      */
-    private void replayFocusLater(final Window window) {
-        if (replayExecutor == null) {
-            replayExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "FocusReplay");
+    private void repeatFocusIn(final Window window) {
+        if (focusExecutor == null) {
+            focusExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "FocusRepeat");
                 thread.setDaemon(true);
                 return thread;
             });
         }
-        for (int delay : new int[]{300, 1000, 2500, 5000, 8000, 12000, 18000, 25000}) {
-            replayExecutor.schedule(() -> {
+        for (int delay : new int[]{500, 2000, 5000, 10000, 20000, 30000}) {
+            focusExecutor.schedule(() -> {
                 try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.INPUT_DEVICE)) {
-                    if (xServer.windowManager.getFocusedWindow() != window || !window.attributes.isMapped()) return;
-                    window.sendEvent(Event.FOCUS_CHANGE, new FocusEvent(true, FocusEvent.DETAIL_NONLINEAR, window, FocusEvent.MODE_NORMAL));
-                    short x = xServer.pointer.getClampedX();
-                    short y = xServer.pointer.getClampedY();
-                    if (window.containsPoint(x, y)) {
-                        short[] local = window.rootPointToLocal(x, y);
-                        window.sendEvent(Event.ENTER_WINDOW, new EnterNotify(PointerWindowEvent.Detail.ANCESTOR, xServer.windowManager.rootWindow, window, null,
-                                x, y, local[0], local[1], getKeyButMask(), PointerWindowEvent.Mode.NORMAL, true));
-                    }
-                    window.sendEvent(Event.EXPOSURE, new com.winlator.cmod.xserver.events.Expose(window));
+                    // Only while it still holds the focus: a later window of its own must not be talked over.
+                    if (xServer.windowManager.getFocusedWindow() != window || !window.attributes.isEnabled()) return;
+                    sendFocusIn(window);
                 }
             }, delay, java.util.concurrent.TimeUnit.MILLISECONDS);
         }
@@ -252,9 +253,13 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
             winHandler.mouseEvent(MouseEventFlags.getFlagFor(button, false), 0, 0, 0);
         }
         else {
-            Bitmask eventMask = createPointerEventMask();
+            // A ButtonRelease goes where its ButtonPress went, and is chosen by the window's interest in ButtonRelease.
+            // It used to be looked up, and delivered, by the pointer-motion mask: a program that reads motion some
+            // other way (BeamNG takes it from XInput2) selects no motion at all, and then the press arrived while the
+            // release was dropped. A menu acts on the release, so every click did nothing.
             Window grabWindow = xServer.grabManager.getWindow();
-            Window window = grabWindow == null || xServer.grabManager.isOwnerEvents() ? pointWindow.getAncestorWithEventMask(eventMask) : null;
+            Window window = grabWindow == null || xServer.grabManager.isOwnerEvents()
+                    ? pointWindow.getAncestorWithEventId(Event.BUTTON_RELEASE) : null;
 
             if (grabWindow != null || window != null) {
                 Window eventWindow = window != null ? window : grabWindow;
@@ -268,7 +273,7 @@ public class InputDeviceManager implements Pointer.OnPointerMotionListener, Keyb
                 Bitmask state = getKeyButMask();
                 state.set(button.flag());
                 ButtonRelease buttonRelease = new ButtonRelease(button.code(), xServer.windowManager.rootWindow, eventWindow, child, x, y, localPoint[0], localPoint[1], state);
-                sendEvent(window, eventMask, buttonRelease);
+                sendEvent(window, Event.BUTTON_RELEASE, buttonRelease);
             }
 
             if (xServer.pointer.getButtonMask().isEmpty() && xServer.grabManager.isReleaseWithButtons()) {

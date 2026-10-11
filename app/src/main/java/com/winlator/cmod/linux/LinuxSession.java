@@ -165,6 +165,19 @@ public final class LinuxSession {
             bind(argv, "/proc/self/fd/" + fd, "/dev/" + new String[]{"stdin", "stdout", "stderr"}[fd]);
         }
         bind(argv, shmDir.getPath(), "/dev/shm");
+        // Android's own /dev/input is unreadable by apps, and SDL finds a pad by listing that directory: the app's
+        // gamepad files stand in for it. libskyshim turns them from plain files into evdev devices (see guestEnv).
+        File inputDir = inputDir(context);
+        inputDir.mkdirs();
+        try {
+            // SDL lists the pads once, as it starts: a node that appears later is only found if the program
+            // watches for one, so the first slot is always there, for the on-screen pad if for nothing else.
+            new File(inputDir, "event0").createNewFile();
+        }
+        catch (java.io.IOException e) {
+            Log.w(TAG, "Cannot create the gamepad file", e);
+        }
+        bind(argv, inputDir.getPath(), "/dev/input");
         bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/fs/selinux");
         for (String name : FAKE_PROC_FILES) {
             File fake = new File(rt, FAKE_PROC_DIR + "/" + name);
@@ -234,18 +247,13 @@ public final class LinuxSession {
             }
         }
 
-        // Gamepad: the app writes the controller state as evdev events into this folder; libskyshim presents event0
-        // to SDL as an Xbox 360 pad. The file has to exist when the program starts for SDL to list the pad.
-        File inputDir = new File(context.getFilesDir(), "imagefs/dev/input");
-        inputDir.mkdirs();
-        try {
-            new File(inputDir, "event0").createNewFile();
-        }
-        catch (java.io.IOException e) {
-            Log.w(TAG, "Cannot create the gamepad file", e);
-        }
-        env.put("SKY_INPUT_DIR", inputDir.getPath());
-        env.put("SDL_JOYSTICK_DEVICE", "/dev/input/event0");
+        // Gamepad: libskyshim answers the evdev ioctls on the files in this folder (see inputDir), which build()
+        // binds over /dev/input. SDL lists a pad by reading that directory, so the bind is what makes it visible;
+        // on its own the shim only answers a path a program already knows.
+        env.put("SKY_INPUT_DIR", inputDir(context).getPath());
+        // No udev runs in the session, so SDL must scan /dev/input itself instead of waiting on a monitor.
+        env.put("SDL_JOYSTICK_DISABLE_UDEV", "1");
+        env.put("SDL_HIDAPI_JOYSTICK_DISABLE_UDEV", "1");
 
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
@@ -255,9 +263,18 @@ public final class LinuxSession {
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
             env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
             env.put("BOX64_NOBANNER", "1");
-            // Programs with an embedded Chromium (CEF) abort on the setuid sandbox check; see tools/linux-shim/cefnosb.c.
-            File cefShim = stageAsset(context, "libcefnosb_x64.so");
-            if (cefShim != null) env.put("BOX64_LD_PRELOAD", cefShim.getPath());
+            // An emulated program is an x86-64 process, so the session's aarch64 libraries are never loaded into it:
+            // the shims it needs are preloaded again, built for that architecture.
+            StringBuilder preload = new StringBuilder();
+            for (String name : new String[]{
+                    "libskyshim_x64.so",   // the gamepad's evdev ioctls and the uevent socket
+                    "libcefnosb_x64.so"}) { // an embedded Chromium (CEF) aborts on the setuid sandbox check
+                File shim = stageAsset(context, name);
+                if (shim == null) continue;
+                if (preload.length() > 0) preload.append(':');
+                preload.append(shim.getPath());
+            }
+            if (preload.length() > 0) env.put("BOX64_LD_PRELOAD", preload.toString());
             env.put("BOX64_DYNAREC", "1");
             String preset = container.getExtra(LinuxEmulator.EXTRA_PRESET);
             if (preset.isEmpty()) preset = com.winlator.cmod.box64.Box64Preset.COMPATIBILITY;
@@ -344,6 +361,11 @@ public final class LinuxSession {
             Log.w(TAG, "Cannot stage " + name, e);
             return null;
         }
+    }
+
+    /** Where the app writes the controllers' evdev events; bound over /dev/input in the session. */
+    public static File inputDir(Context context) {
+        return new File(context.getFilesDir(), "imagefs/dev/input");
     }
 
     private static void bind(List<String> argv, String path) {

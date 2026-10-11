@@ -24,6 +24,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <time.h>
 #include <linux/input.h>
 #include <linux/netlink.h>
 #include <string.h>
@@ -57,6 +58,7 @@ static void forget(int fd) {
 
 #define MAX_PADS 16
 static int pad_fds[MAX_PADS];
+static int pad_clocks[MAX_PADS];
 static int pad_count;
 
 static int pad_is(int fd) {
@@ -65,13 +67,26 @@ static int pad_is(int fd) {
 }
 
 static void pad_remember(int fd) {
-    if (pad_count < MAX_PADS) pad_fds[pad_count++] = fd;
+    if (pad_count < MAX_PADS) {
+        pad_clocks[pad_count] = CLOCK_REALTIME; // what evdev uses until a program asks for another
+        pad_fds[pad_count++] = fd;
+    }
+}
+
+static void pad_set_clock(int fd, int clock) {
+    for (int i = 0; i < pad_count; i++) if (pad_fds[i] == fd) pad_clocks[i] = clock;
+}
+
+static int pad_clock(int fd) {
+    for (int i = 0; i < pad_count; i++) if (pad_fds[i] == fd) return pad_clocks[i];
+    return CLOCK_REALTIME;
 }
 
 static void pad_forget(int fd) {
     for (int i = 0; i < pad_count; i++) {
         if (pad_fds[i] == fd) {
             pad_fds[i] = pad_fds[--pad_count];
+            pad_clocks[i] = pad_clocks[pad_count];
             return;
         }
     }
@@ -203,7 +218,7 @@ static int pad_ioctl(unsigned long req, void *arg) {
         memcpy(arg, &info, size < sizeof info ? size : sizeof info);
         return 0;
     }
-    if (nr == 0x90 || nr == 0xa0) return 0; // grab, clock id
+    if (nr == 0x90) return 0; // grab
     errno = EINVAL;
     return -1;
 }
@@ -215,7 +230,15 @@ int ioctl(int fd, unsigned long req, ...) {
     va_start(ap, req);
     void *arg = va_arg(ap, void *);
     va_end(ap);
-    if (pad_is(fd)) return pad_ioctl(req, arg);
+    if (pad_is(fd)) {
+        // EVIOCSCLOCKID: a program that asks for one clock and is answered on another reads every event as
+        // decades old or ahead of now, which is how long ago it looks like the button was pressed.
+        if ((req & 0xff) == 0xa0 && ((req >> 8) & 0xff) == 'E') {
+            pad_set_clock(fd, arg ? *(const int *)arg : CLOCK_REALTIME);
+            return 0;
+        }
+        return pad_ioctl(req, arg);
+    }
     return real(fd, req, arg);
 }
 
@@ -225,11 +248,17 @@ ssize_t read(int fd, void *buf, size_t count) {
     ssize_t n = real(fd, buf, count);
     if (n >= 0 && pad_is(fd)) {
         if (n == 0) { errno = EAGAIN; return -1; } // a device that has nothing yet, not end of file
+        struct timespec now;
+        if (clock_gettime(pad_clock(fd), &now) != 0) now.tv_sec = now.tv_nsec = 0;
         // The app names the triggers ABS_BRAKE / ABS_GAS; an Xbox 360 pad reports them as ABS_Z / ABS_RZ.
         struct input_event *events = buf;
         for (size_t i = 0; i < (size_t)n / sizeof *events; i++) {
             if (events[i].type == EV_ABS && events[i].code == ABS_BRAKE) events[i].code = ABS_Z;
             else if (events[i].type == EV_ABS && events[i].code == ABS_GAS) events[i].code = ABS_RZ;
+            // The app stamps events with its own wall clock; a reader wants them on the clock it chose,
+            // and these have only just been read, so "now" is the honest answer.
+            events[i].time.tv_sec = now.tv_sec;
+            events[i].time.tv_usec = now.tv_nsec / 1000;
         }
     }
     return n;

@@ -7,6 +7,8 @@ import com.winlator.cmod.xconnector.XOutputStream;
 import com.winlator.cmod.xconnector.XStreamLock;
 import com.winlator.cmod.xserver.Keyboard;
 import com.winlator.cmod.xserver.XClient;
+import com.winlator.cmod.xserver.errors.BadImplementation;
+import com.winlator.cmod.xserver.errors.XRequestError;
 
 import java.io.IOException;
 
@@ -23,7 +25,19 @@ public class XkbExtension implements Extension {
     private static final int USE_EXTENSION = 0;
     private static final int GET_STATE = 4;
     private static final int GET_MAP = 8;
+    private static final int GET_NAMES = 17;
     private static final int PER_CLIENT_FLAGS = 21;
+
+    /**
+     * The requests that carry a reply. One of them left unanswered hangs the client for ever rather than failing it,
+     * so the ones without an implementation below are refused instead of ignored.
+     */
+    private static final int[] WITH_REPLY = {0, 4, 6, 8, 10, 12, 13, 15, 17, 19, 21, 22, 23, 24};
+
+    private static boolean expectsReply(int minor) {
+        for (int value : WITH_REPLY) if (value == minor) return true;
+        return false;
+    }
 
     @Override
     public String getName() {
@@ -46,7 +60,7 @@ public class XkbExtension implements Extension {
     }
 
     @Override
-    public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException {
+    public void handleRequest(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int minor = client.getRequestData() & 0xff;
         int want = 0;
         if (minor == GET_MAP) {
@@ -92,8 +106,29 @@ public class XkbExtension implements Extension {
             case GET_MAP:
                 writeMap(client, outputStream, want);
                 break;
+            case GET_NAMES:
+                // No names are kept, so none are reported: a client reads the value list by the reply's own
+                // "which", and an empty one leaves it with the keyboard it already has from GetMap.
+                try (XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)3);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);                        // no value list
+                    outputStream.writeInt(0);                        // which: nothing reported
+                    outputStream.writeByte((byte)Keyboard.MIN_KEYCODE);
+                    outputStream.writeByte((byte)Keyboard.MAX_KEYCODE);
+                    outputStream.writePad(2);                        // nTypes, group names
+                    outputStream.writeShort((short)0);               // virtual mods
+                    outputStream.writePad(2);                        // first key, key count
+                    outputStream.writeInt(0);                        // indicators
+                    outputStream.writePad(2);                        // radio groups, key aliases
+                    outputStream.writeShort((short)0);               // key type levels
+                    outputStream.writePad(4);
+                }
+                break;
             default:
                 // SelectEvents, SetMap, Bell and the like need no answer.
+                if (expectsReply(minor)) throw new BadImplementation();
                 break;
         }
     }
