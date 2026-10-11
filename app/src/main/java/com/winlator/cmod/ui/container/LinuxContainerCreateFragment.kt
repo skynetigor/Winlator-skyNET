@@ -187,7 +187,8 @@ private fun LinuxContainerEditor(
             editing?.getExtra("hudMode")?.toIntOrNull()?.coerceIn(0, 2) ?: if (editing?.isShowFPS == true) 1 else 0
         )
     }
-    var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: false) }
+    // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
+    var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: true) }
     var envVars by remember {
         mutableStateOf(editing?.envVars?.takeIf { it != Container.DEFAULT_ENV_VARS } ?: "")
     }
@@ -443,7 +444,7 @@ private fun LinuxContainerEditor(
                     HUD_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
                 ) { hudMode = it.toInt() }
                 SettingsDivider()
-                SettingToggle("Fullscreen stretched", stretched) { stretched = it }
+                SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
             }
 
             SectionTitle("Environment variables")

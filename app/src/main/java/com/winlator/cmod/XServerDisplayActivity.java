@@ -636,18 +636,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             }
 
+            /**
+             * Wine's wrapper tags the window it renders with a _MESA_DRV property, and that is how the HUD finds the
+             * window whose frames it counts. A Linux session has no such tag: the first top-level window that draws is it.
+             */
+            private void selectFrameRatingWindowOfLinuxSession(Window window) {
+                if (!linuxSession || frameRatingWindowId != -1 || !isSessionApplicationWindow(window)) return;
+                if (!((modernHud != null && modernHud.isUserEnabled())
+                        || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) return;
+                frameRatingWindowId = window.id;
+                activeRendererWindowId = window.id;
+                if (xServerView != null) xServerView.setFpsWindowId(window.id);
+                if (modernHud != null) runOnUiThread(() -> modernHud.onRendererDetected(null));
+                if (classicHud != null) classicHud.update();
+            }
+
             @Override
             public void onUpdateWindowContentDirect(Window window, com.winlator.cmod.xserver.Drawable drawable) {
                 // A frame handed over as a dma-buf (or a hardware buffer) is the program drawing too. The renderer
                 // counts the frame for the HUD itself; what is left to do is to pick the window it counts.
                 onApplicationWindowDrawn(window);
-                if (frameRatingWindowId == -1 && lastRendererName != null && isSessionApplicationWindow(window)
-                        && ((modernHud != null && modernHud.isUserEnabled())
-                         || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {
-                    frameRatingWindowId = window.id;
-                    activeRendererWindowId = window.id;
-                    if (xServerView != null) xServerView.setFpsWindowId(window.id);
-                }
+                selectFrameRatingWindowOfLinuxSession(window);
             }
 
             @Override
@@ -657,7 +666,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (frameRatingWindowId == window.id) {
                     if (classicHud != null) classicHud.update();
                     if (modernHud != null) modernHud.onFrame();
-                } else if (frameRatingWindowId == -1 && lastRendererName != null
+                } else if (frameRatingWindowId == -1 && (lastRendererName != null || linuxSession)
                         && isSessionApplicationWindow(window)
                         && ((modernHud != null && modernHud.isUserEnabled())
                          || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {

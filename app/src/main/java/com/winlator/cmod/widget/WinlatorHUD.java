@@ -1165,6 +1165,7 @@ public class WinlatorHUD extends View {
                 }
 
                 if (dragging) {
+                    keepOnScreen();
                     savePosition();
                 } else if (touchDownMs > 0
                         && System.currentTimeMillis() - touchDownMs < 300) {
@@ -1226,6 +1227,31 @@ public class WinlatorHUD extends View {
             if (getVisibility() != VISIBLE) setVisibility(VISIBLE);
             scheduleRedraw();
         }
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        if (!dragging) post(this::keepOnScreen);
+    }
+
+    /**
+     * A position saved on another screen (the HUD dragged off the edge, a different window size such as DeX) can
+     * leave part of it outside the screen. Brings it back inside, scale included.
+     */
+    private void keepOnScreen() {
+        if (!(getParent() instanceof View)) return;
+        View parent = (View) getParent();
+        if (parent.getWidth() == 0 || getWidth() == 0) return;
+        float visW = getWidth() * getScaleX(), visH = getHeight() * getScaleY();
+        float insetX = (getWidth() - visW) / 2f, insetY = (getHeight() - visH) / 2f;  // the view scales about its centre
+        float minX = -insetX, minY = -insetY;
+        float maxX = Math.max(minX, parent.getWidth() - visW - insetX);
+        float maxY = Math.max(minY, parent.getHeight() - visH - insetY);
+        float x = Math.min(Math.max(getX(), minX), maxX);
+        float y = Math.min(Math.max(getY(), minY), maxY);
+        if (x != getX()) setX(x);
+        if (y != getY()) setY(y);
     }
 
     private void savePosition() {
