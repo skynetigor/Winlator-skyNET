@@ -152,9 +152,21 @@ public class WindowManager extends XResourceManager {
         }
     }
 
+    public interface OnFocusChangeListener {
+        void onFocusChanged(Window oldFocus, Window newFocus);
+    }
+
+    private OnFocusChangeListener focusChangeListener;
+
+    public void setOnFocusChangeListener(OnFocusChangeListener listener) {
+        this.focusChangeListener = listener;
+    }
+
     public void setFocus(Window focusedWindow, FocusRevertTo focusRevertTo) {
+        Window oldFocus = this.focusedWindow;
         this.focusedWindow = focusedWindow;
         this.focusRevertTo = focusRevertTo;
+        if (oldFocus != focusedWindow && focusChangeListener != null) focusChangeListener.onFocusChanged(oldFocus, focusedWindow);
     }
 
     public FocusRevertTo getFocusRevertTo() {

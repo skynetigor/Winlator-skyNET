@@ -541,12 +541,17 @@ public class TouchpadView extends View {
         }
     }
 
+    /** Linux programs (games with an embedded browser) miss clicks shorter than a frame or two; Wine is fine with 30 ms. */
+    private long clickDuration() {
+        return xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) != null ? 120 : 30;
+    }
+
     private void releasePointerButtonLeft(final Finger finger) {
         if (pointerButtonLeftEnabled && finger == fingerPointerButtonLeft && xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
                 fingerPointerButtonLeft = null;
-            }, 30);
+            }, clickDuration());
         }
     }
 
@@ -555,7 +560,7 @@ public class TouchpadView extends View {
             postDelayed(() -> {
                 xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT);
                 fingerPointerButtonRight = null;
-            }, 30);
+            }, clickDuration());
         }
     }
 

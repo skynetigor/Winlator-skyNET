@@ -55,7 +55,8 @@ public abstract class PointerWindowEvent extends Event {
             outputStream.writeShort(eventY);
             outputStream.writeShort((short)state.getBits());
             outputStream.writeByte((byte)mode.ordinal());
-            outputStream.writeByte((byte)(sameScreenAndFocus ? 1 : 0));
+            // bit 0: the window has the keyboard focus, bit 1: same screen (always)
+            outputStream.writeByte((byte)(sameScreenAndFocus ? 3 : 2));
         }
     }
 }

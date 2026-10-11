@@ -234,6 +234,19 @@ public final class LinuxSession {
             }
         }
 
+        // Gamepad: the app writes the controller state as evdev events into this folder; libskyshim presents event0
+        // to SDL as an Xbox 360 pad. The file has to exist when the program starts for SDL to list the pad.
+        File inputDir = new File(context.getFilesDir(), "imagefs/dev/input");
+        inputDir.mkdirs();
+        try {
+            new File(inputDir, "event0").createNewFile();
+        }
+        catch (java.io.IOException e) {
+            Log.w(TAG, "Cannot create the gamepad file", e);
+        }
+        env.put("SKY_INPUT_DIR", inputDir.getPath());
+        env.put("SDL_JOYSTICK_DEVICE", "/dev/input/event0");
+
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");
 

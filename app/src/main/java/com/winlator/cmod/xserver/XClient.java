@@ -98,6 +98,8 @@ public class XClient implements XResourceManager.OnResourceLifecycleListener {
             xServer.pixmapManager.removeOnResourceLifecycleListener(this);
             xServer.graphicsContextManager.removeOnResourceLifecycleListener(this);
             xServer.cursorManager.removeOnResourceLifecycleListener(this);
+            com.winlator.cmod.xserver.extensions.XInput2Extension xi2 = xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE);
+            if (xi2 != null) xi2.removeClient(this);
             xServer.resourceIDs.free(resourceIDBase);
         }
     }

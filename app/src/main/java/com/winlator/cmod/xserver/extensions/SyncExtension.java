@@ -183,6 +183,45 @@ public class SyncExtension implements Extension, XResourceManager.OnResourceLife
             case ClientOpcodes.AWAIT_FENCE:
                 awaitFence(client, inputStream, outputStream);
                 break;
+            case 0: { // Initialize: libXext / SDL ask for the version before anything else
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeByte((byte)3);
+                    outputStream.writeByte((byte)1);
+                    outputStream.writePad(22);
+                }
+                break;
+            }
+            case 1: // ListSystemCounters: none
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writePad(20);
+                }
+                break;
+            case 5: // QueryCounter: counters are accepted but not tracked, so report zero
+                client.skipRequest();
+                try (com.winlator.cmod.xconnector.XStreamLock lock = outputStream.lock()) {
+                    outputStream.writeByte(com.winlator.cmod.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS);
+                    outputStream.writeByte((byte)0);
+                    outputStream.writeShort(client.getSequenceNumber());
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writeInt(0);
+                    outputStream.writePad(16);
+                }
+                break;
+            case 2: case 3: case 4: case 6: case 7: case 8: case 10: case 11: case 12: // counter / alarm / priority requests without reply
+                client.skipRequest();
+                break;
             default:
                 throw new BadImplementation();
         }

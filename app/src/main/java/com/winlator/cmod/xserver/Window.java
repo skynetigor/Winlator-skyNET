@@ -269,6 +269,14 @@ public class Window extends XResource {
         return false;
     }
 
+    public int eventListenerCount(int eventId) {
+        int count = 0;
+        for (EventListener eventListener : eventListeners) {
+            if (eventListener.isInterestedIn(eventId)) count++;
+        }
+        return count;
+    }
+
     public void sendEvent(int eventId, Event event) {
         for (EventListener eventListener : eventListeners) {
             if (eventListener.isInterestedIn(eventId)) {

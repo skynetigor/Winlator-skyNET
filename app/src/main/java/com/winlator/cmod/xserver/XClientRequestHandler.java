@@ -323,7 +323,9 @@ public class XClientRequestHandler implements RequestHandler {
                     }
                     break;
                 case ClientOpcodes.QUERY_KEYMAP:
-                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER);
+                         XStreamLock streamLock = outputStream.lock()) {
+                        // The reply has to be flushed (the stream lock does that on close); without it the client waits for ever.
                         outputStream.writeByte(RESPONSE_CODE_SUCCESS);
                         outputStream.writeByte((byte) 0);
                         outputStream.writeShort(client.getSequenceNumber());

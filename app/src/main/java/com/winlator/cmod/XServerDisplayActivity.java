@@ -602,6 +602,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3 only takes the
             // Wine wrapper's AHardwareBuffer sockets. Without them clients send images over the socket. Present stays:
             // Mesa sends Present requests unconditionally and libxcb drops the connection if the server lacks it.
+            xServer.extensions.put(com.winlator.cmod.xserver.extensions.XkbExtension.MAJOR_OPCODE,
+                    new com.winlator.cmod.xserver.extensions.XkbExtension());
+            xServer.extensions.put(com.winlator.cmod.xserver.extensions.XFixesExtension.MAJOR_OPCODE,
+                    new com.winlator.cmod.xserver.extensions.XFixesExtension());
+            xServer.extensions.put(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE,
+                    new com.winlator.cmod.xserver.extensions.XInput2Extension(xServer));
+            // Like a real X server, start with the focus on PointerRoot, not None.
+            xServer.windowManager.setFocus(xServer.windowManager.rootWindow, WindowManager.FocusRevertTo.POINTER_ROOT);
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
             xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
         }

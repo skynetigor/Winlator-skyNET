@@ -133,6 +133,7 @@ public abstract class WindowRequests {
         int windowId = inputStream.readInt();
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) android.util.Log.d("XTrace", "MapWindow " + windowId);
         client.xServer.windowManager.mapWindow(window);
     }
 
@@ -157,6 +158,7 @@ public abstract class WindowRequests {
         int windowId = inputStream.readInt();
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) android.util.Log.d("XTrace", "UnmapWindow " + windowId);
         client.xServer.windowManager.unmapWindow(window);
     }
 
@@ -346,6 +348,20 @@ public abstract class WindowRequests {
         int windowId = inputStream.readInt();
         inputStream.skip(4);
 
+        if (client.xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) != null) {
+            // Linux sessions: the focus window is the request's window (None / PointerRoot / a window), as the protocol says.
+            // The Wine-oriented code below picks it from the revert-to field, which loses SetInputFocus(window, RevertToNone).
+            Window target;
+            if (windowId == 0) target = null;
+            else if (windowId == 1) target = client.xServer.windowManager.rootWindow;
+            else {
+                target = client.xServer.windowManager.getWindow(windowId);
+                if (target == null) throw new BadWindow(windowId);
+            }
+            client.xServer.windowManager.setFocus(target, focusRevertTo);
+            return;
+        }
+
         switch (focusRevertTo) {
             case NONE:
                 client.xServer.windowManager.setFocus(null, focusRevertTo);
@@ -369,7 +385,10 @@ public abstract class WindowRequests {
             outputStream.writeByte((byte)client.xServer.windowManager.getFocusRevertTo().ordinal());
             outputStream.writeShort(client.getSequenceNumber());
             outputStream.writeInt(0);
-            outputStream.writeInt(focusedWindow != null ? focusedWindow.id : 0);
+            // None is 0 and PointerRoot is 1; Linux programs (SDL) read these, so the root window means PointerRoot
+            boolean pointerRoot = focusedWindow == client.xServer.windowManager.rootWindow
+                    && client.xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) != null;
+            outputStream.writeInt(pointerRoot ? 1 : (focusedWindow != null ? focusedWindow.id : 0));
             outputStream.writePad(20);
         }
     }
