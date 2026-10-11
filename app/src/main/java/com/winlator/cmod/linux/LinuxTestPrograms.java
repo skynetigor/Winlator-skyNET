@@ -9,16 +9,19 @@ import com.winlator.cmod.core.FileUtils;
 import java.io.File;
 
 /**
- * The gamepad tester that ships with the app. It draws what the guest's SDL reports, so the controller the app
- * believes it is sending can be checked against what a program actually receives, with nothing to install.
+ * The input testers that ship with the app. They draw what the guest's SDL reports, so the controller and the
+ * pointer the app believes it is sending can be checked against what a program actually receives, with nothing
+ * to install.
  *
- * Two builds are offered: the native one tests the container, and the x86-64 one tests the same pad as seen by a
- * program under Box64, which is where a game like BeamNG reads it.
+ * Each comes in two builds: the native one tests the container, and the x86-64 one tests the same input as seen
+ * by a program under Box64, which is where a game like BeamNG reads it.
  */
 public final class LinuxTestPrograms {
     private static final String TOOLS_DIR = "linux-tools";
     private static final String GAMEPAD_TEST = "gamepadtest";
     private static final String GAMEPAD_TEST_X64 = "gamepadtest_x64";
+    private static final String MOUSE_TEST = "mousetest";
+    private static final String MOUSE_TEST_X64 = "mousetest_x64";
 
     private LinuxTestPrograms() {}
 
@@ -27,6 +30,8 @@ public final class LinuxTestPrograms {
         if (container == null || !container.isLinux()) return;
         addShortcut(context, container, "Gamepad test", GAMEPAD_TEST);
         addShortcut(context, container, "Gamepad test (x86-64)", GAMEPAD_TEST_X64);
+        addShortcut(context, container, "Mouse test", MOUSE_TEST);
+        addShortcut(context, container, "Mouse test (x86-64)", MOUSE_TEST_X64);
     }
 
     private static void addShortcut(Context context, Container container, String name, String asset) {
