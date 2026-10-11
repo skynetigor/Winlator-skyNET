@@ -37,6 +37,13 @@ static int (*SDL_RenderDrawRect)(void *, const Rect *);
 static void (*SDL_RenderPresent)(void *);
 static int (*SDL_PollEvent)(void *);
 static void (*SDL_Delay)(uint32_t);
+static void *(*SDL_GetKeyboardFocus)(void);
+static void *(*SDL_GetMouseFocus)(void);
+static uint32_t (*SDL_GetMouseState)(int *, int *);
+static uint32_t (*SDL_GetWindowFlags)(void *);
+static uint32_t (*SDL_GetTicks)(void);
+static int (*SDL_GetWindowWMInfo)(void *, void *);
+static uint32_t (*SDL_GetWindowID)(void *);
 
 #define INIT_VIDEO 0x20u
 #define WINDOW_SHOWN 0x4u
@@ -135,6 +142,10 @@ int main(void) {
     SYM(SDL_RenderFillRect, "SDL_RenderFillRect"); SYM(SDL_RenderDrawRect, "SDL_RenderDrawRect");
     SYM(SDL_RenderPresent, "SDL_RenderPresent"); SYM(SDL_PollEvent, "SDL_PollEvent");
     SYM(SDL_Delay, "SDL_Delay");
+    SYM(SDL_GetKeyboardFocus, "SDL_GetKeyboardFocus"); SYM(SDL_GetMouseFocus, "SDL_GetMouseFocus");
+    SYM(SDL_GetMouseState, "SDL_GetMouseState"); SYM(SDL_GetWindowFlags, "SDL_GetWindowFlags");
+    SYM(SDL_GetTicks, "SDL_GetTicks");
+    SYM(SDL_GetWindowWMInfo, "SDL_GetWindowWMInfo"); SYM(SDL_GetWindowID, "SDL_GetWindowID");
     if (!SDL_Init || !SDL_CreateRenderer || !SDL_RenderFillRect) {
         printf("mousetest: this libSDL2 is missing what the test needs\n");
         return 1;
@@ -155,11 +166,28 @@ int main(void) {
         return 1;
     }
 
+    /* Which X window SDL is actually listening on: an event sent to any other one is dropped in silence. */
+    if (SDL_GetWindowWMInfo) {
+        unsigned char info[128];
+        memset(info, 0, sizeof info);
+        info[0] = 2; info[1] = 0; info[2] = 0;   /* SDL_version: ask as 2.0.0, which any SDL2 accepts */
+        if (SDL_GetWindowWMInfo(window, info)) {
+            uint32_t subsystem;
+            unsigned long xwindow;
+            memcpy(&subsystem, info + 4, 4);
+            memcpy(&xwindow, info + 16, 8);
+            printf("SDL window: subsystem=%u xwindow=0x%lx (id %u)\n",
+                   subsystem, xwindow, SDL_GetWindowID ? SDL_GetWindowID(window) : 0);
+        }
+        else printf("SDL_GetWindowWMInfo refused: %s\n", SDL_GetError());
+    }
+
     int mouseX = WIDTH / 2, mouseY = HEIGHT / 2;
     int lastRelX = 0, lastRelY = 0;
     int wheelX = 0, wheelY = 0;
     int motions = 0;
     int keys = 0, lastScancode = 0, lastMod = 0;
+    uint32_t lastReport = 0;
     int hasPointer = 0, hasKeyboard = 0;
 
     char buffer[256];
@@ -268,6 +296,17 @@ int main(void) {
 
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
+
+        /* Ask SDL what it believes, rather than inferring it from the events it chose to raise. */
+        if (SDL_GetTicks && SDL_GetTicks() - lastReport > 2000) {
+            lastReport = SDL_GetTicks();
+            int px = 0, py = 0;
+            uint32_t buttons = SDL_GetMouseState ? SDL_GetMouseState(&px, &py) : 0;
+            printf("SDL thinks: keyboardFocus=%s mouseFocus=%s flags=0x%x polledButtons=0x%x at %d,%d\n",
+                   SDL_GetKeyboardFocus && SDL_GetKeyboardFocus() == window ? "ours" : "none",
+                   SDL_GetMouseFocus && SDL_GetMouseFocus() == window ? "ours" : "none",
+                   SDL_GetWindowFlags ? SDL_GetWindowFlags(window) : 0, buttons, px, py);
+        }
     }
 
     SDL_Quit();
