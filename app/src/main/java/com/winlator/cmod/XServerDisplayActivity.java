@@ -15,6 +15,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.util.Rational;
 import android.util.TypedValue;
 import android.content.Context;
+import android.hardware.input.InputManager;
+import android.view.InputDevice;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -1015,6 +1017,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (realMouseListener != null) {
+            InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
+            if (inputManager != null) inputManager.unregisterInputDeviceListener(realMouseListener);
+            realMouseListener = null;
+        }
         if (winlatorLogcatLogger != null) {
             ProcessHelper.removeDebugCallback(winlatorLogcatLogger);
             winlatorLogcatLogger.stop();
@@ -1063,6 +1070,53 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 })
                 .setPositiveButton(R.string.ok, null)
                 .show();
+    }
+
+    private InputManager.InputDeviceListener realMouseListener;
+
+    /**
+     * A mouse that is a device of its own. While the window holds the pointer captured Android reports a mouse as
+     * MOUSE_RELATIVE, and some mice carry a joystick interface too; the phone's own touchpad (sec_touchpad), a
+     * keyboard's trackpad, the touch screen and game pads are not mice.
+     */
+    private static boolean isRealMouse(InputDevice device) {
+        if (device == null || device.isVirtual()) return false;
+        int sources = device.getSources();
+        boolean pointer = (sources & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE
+                || (sources & InputDevice.SOURCE_MOUSE_RELATIVE) == InputDevice.SOURCE_MOUSE_RELATIVE;
+        if (!pointer) return false;
+        return (sources & (InputDevice.SOURCE_TOUCHSCREEN | InputDevice.SOURCE_TOUCHPAD | InputDevice.SOURCE_GAMEPAD)) == 0;
+    }
+
+    /**
+     * With a real mouse connected the touch emulation of a mouse (touchpad, touch screen, simulated touch) is
+     * switched off, and the cursor, which the touch modes hide, is shown. Follows the mouse being plugged in or out.
+     */
+    private void watchRealMouse() {
+        InputManager inputManager = (InputManager)getSystemService(Context.INPUT_SERVICE);
+        if (inputManager == null) return;
+        applyRealMouse();
+        realMouseListener = new InputManager.InputDeviceListener() {
+            @Override public void onInputDeviceAdded(int deviceId) { applyRealMouse(); }
+            @Override public void onInputDeviceRemoved(int deviceId) { applyRealMouse(); }
+            @Override public void onInputDeviceChanged(int deviceId) { applyRealMouse(); }
+        };
+        inputManager.registerInputDeviceListener(realMouseListener, null);
+    }
+
+    private void applyRealMouse() {
+        boolean connected = false;
+        for (int id : InputDevice.getDeviceIds()) {
+            if (isRealMouse(InputDevice.getDevice(id))) { connected = true; break; }
+        }
+        final boolean realMouse = connected;
+        runOnUiThread(() -> {
+            if (touchpadView != null) touchpadView.setRealMouseConnected(realMouse);
+            // The cursor is only hidden by the touch modes, so only they need it brought back.
+            if (xServerView != null && (simulateTouchScreen || preferences.getBoolean("touchscreen_toggle", false))) {
+                xServerView.setCursorVisible(realMouse);
+            }
+        });
     }
 
     @Override
@@ -1408,6 +1462,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView = new TouchpadView(this, xServer, timeoutHandler, hideControlsRunnable);
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMouseEnabled(!isMouseDisabled);
+        watchRealMouse();
         touchpadView.setFourFingersTapCallback(() -> {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START))
                 drawerLayout.openDrawer(GravityCompat.START);

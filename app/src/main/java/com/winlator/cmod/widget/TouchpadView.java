@@ -55,6 +55,7 @@ public class TouchpadView extends View {
     private float resolutionScale;
     private static final int UPDATE_FORM_DELAYED_TIME = 50;
     private boolean mouseEnabled = true;
+    private boolean realMouseConnected = false;
 
     private Handler timeoutHandler; // Reference to the activity's timeout handler
     private Runnable hideControlsRunnable; // Runnable to hide the controls
@@ -169,7 +170,10 @@ public class TouchpadView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         // If mouse is disabled, ignore all input
         if (!mouseEnabled) return true;
-        
+
+        // A real mouse is plugged in: a finger no longer drives the pointer (the mouse's own events, and a stylus, still do).
+        if (realMouseConnected && isFingerOnTouchscreen(event)) return true;
+
         boolean isTouchscreenMode = preferences.getBoolean("touchscreen_toggle", false);
 
         // Reset the timeout timer to keep controls visible
@@ -747,5 +751,24 @@ public class TouchpadView extends View {
     
     public void setMouseEnabled(boolean enabled) {
         this.mouseEnabled = enabled;
+    }
+
+    /**
+     * A finger on a touch screen, judged by the device the event comes from and not by its tool type: under DeX the
+     * mouse's events reached this view looking like a finger's, and were swallowed along with the touches.
+     */
+    private boolean isFingerOnTouchscreen(MotionEvent event) {
+        if (event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER) return false;
+        int source = event.getSource();
+        if ((source & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) return false;
+        InputDevice device = event.getDevice();
+        if (device == null || device.isVirtual()) return false;
+        int sources = device.getSources();
+        if ((sources & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) return false;
+        return (sources & InputDevice.SOURCE_TOUCHSCREEN) == InputDevice.SOURCE_TOUCHSCREEN;
+    }
+
+    public void setRealMouseConnected(boolean connected) {
+        this.realMouseConnected = connected;
     }
 }
