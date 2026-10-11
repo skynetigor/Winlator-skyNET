@@ -126,7 +126,27 @@ public abstract class WindowRequests {
         Window parent = client.xServer.windowManager.getWindow(parentId);
         if (parent == null) throw new BadWindow(parentId);
 
-        client.xServer.windowManager.reparentWindow(window, parent, x, y);
+        WindowManager windowManager = client.xServer.windowManager;
+        if (client.xServer.getExtension(com.winlator.cmod.xserver.extensions.XInput2Extension.MAJOR_OPCODE) == null) {
+            windowManager.reparentWindow(window, parent, x, y);
+            return;
+        }
+
+        // Linux sessions. A mapped window is unmapped, reparented and mapped again, and the program is told each step:
+        // with no window manager, SDL puts a fullscreen window into a new window of the screen's size this way and
+        // waits for the answer. Without it the window never announced it was back, and the focus stayed with the new
+        // parent, which asks for no focus events: the program lost the keyboard and the pad as it went fullscreen.
+        boolean wasMapped = window.attributes.isMapped();
+        boolean hadFocus = windowManager.getFocusedWindow() == window;
+        if (wasMapped) windowManager.unmapWindow(window);
+        windowManager.reparentWindow(window, parent, x, y);
+        if (wasMapped) {
+            windowManager.mapWindow(window);
+            // The server hands the focus to a window that opens (XServerDisplayActivity), so a new parent holds it now.
+            if (hadFocus || windowManager.getFocusedWindow() == parent) {
+                windowManager.setFocus(window, WindowManager.FocusRevertTo.POINTER_ROOT);
+            }
+        }
     }
 
     public static void mapWindow(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
