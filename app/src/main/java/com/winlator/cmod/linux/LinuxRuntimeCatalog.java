@@ -110,4 +110,29 @@ public final class LinuxRuntimeCatalog {
             return null;
         }
     }
+
+    /** Blocking. The Linux Vulkan drivers (Turnip zips) that can be downloaded; null when the catalog cannot be read. */
+    public static List<Entry> fetchDrivers() {
+        String json = Downloader.downloadString(SKYNET_CATALOG_URL);
+        if (json == null) return null;
+        try {
+            List<Entry> entries = new ArrayList<>();
+            JSONArray drivers = new JSONObject(json).optJSONArray("drivers");
+            if (drivers == null) return entries;
+            for (int i = 0; i < drivers.length(); i++) {
+                JSONObject item = drivers.getJSONObject(i);
+                String url = item.getString("url");
+                String id = item.getString("id");
+                if (!url.startsWith("https://") || !id.matches("[A-Za-z0-9][A-Za-z0-9._-]*")) continue;
+                entries.add(new Entry(id, item.optString("name", id), item.optString("version", ""), url,
+                        item.getString("sha256"), item.optLong("size", 0), item.optString("channel", "prerelease"),
+                        LinuxPackages.KIND_DRIVER, null));
+            }
+            return entries;
+        }
+        catch (Exception e) {
+            Log.e(TAG, "Bad Linux catalog", e);
+            return null;
+        }
+    }
 }

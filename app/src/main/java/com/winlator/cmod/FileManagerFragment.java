@@ -843,10 +843,55 @@ public class FileManagerFragment extends Fragment {
             }
 
             String displayName = getSmartDisplayName(file);
+            File shortcutsDir = container.getDesktopDir();
+            if (!shortcutsDir.exists()) shortcutsDir.mkdirs();
+            if (new File(shortcutsDir, displayName + ".desktop").exists()) {
+                // Two versions of a game can have the same executable name: ask for another name for the new one.
+                askNewShortcutName(shortcutsDir, displayName,
+                        newName -> writeShortcut(file, container, newName));
+                return;
+            }
+            writeShortcut(file, container, displayName);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void askNewShortcutName(File shortcutsDir, String takenName, java.util.function.Consumer<String> onName) {
+        final EditText input = new EditText(getContext());
+        input.setSingleLine(true);
+        // Offer a free name to start from: "Name (2)", "Name (3)" ...
+        int n = 2;
+        while (new File(shortcutsDir, takenName + " (" + n + ").desktop").exists()) n++;
+        final String suggestion = takenName + " (" + n + ")";
+        input.setText(suggestion);
+        input.setSelection(suggestion.length());
+        final AlertDialog dialog = new AlertDialog.Builder(getContext())
+                .setTitle("This game already exists")
+                .setMessage("A shortcut named \"" + takenName + "\" is already in this container. Give the new one a name.")
+                .setView(input)
+                .setPositiveButton("Add", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String name = input.getText().toString().trim();
+            if (name.isEmpty() || name.contains("/")) {
+                input.setError("Enter a name");
+            } else if (new File(shortcutsDir, name + ".desktop").exists()) {
+                input.setError("This name is taken");
+            } else {
+                dialog.dismiss();
+                onName.accept(name);
+            }
+        }));
+        dialog.show();
+    }
+
+    private void writeShortcut(File file, Container container, String displayName) {
+        try {
             String unixPath = file.getAbsolutePath();
             String winePrefix = getContainerWineHome(container) + "/.wine";
             File shortcutsDir = container.getDesktopDir();
-            if (!shortcutsDir.exists()) shortcutsDir.mkdirs();
             File desktopFile = new File(shortcutsDir, displayName + ".desktop");
 
             try (PrintWriter writer = new PrintWriter(new FileWriter(desktopFile))) {

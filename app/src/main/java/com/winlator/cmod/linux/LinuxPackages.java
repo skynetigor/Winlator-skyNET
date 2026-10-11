@@ -9,6 +9,8 @@ public final class LinuxPackages {
     public static final String KIND_RUNTIME = "runtime";
     public static final String KIND_EMULATOR = "emulator";
     public static final String KIND_ROOTFS = "rootfs";
+    /** A Vulkan driver zip; it is installed by LinuxDriverManager, not unpacked into a folder of its own here. */
+    public static final String KIND_DRIVER = "driver";
 
     private LinuxPackages() {}
 

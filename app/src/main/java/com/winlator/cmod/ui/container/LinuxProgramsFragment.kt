@@ -108,6 +108,17 @@ class LinuxProgramsFragment : Fragment() {
 
 private data class LinuxProgram(val name: String, val path: String, val file: File)
 
+/** A program whose name is taken by another shortcut of the container, waiting for the user to name it. */
+private data class NameClash(val name: String, val path: String)
+
+/** A folder name that does not exist in [parent] yet: [name], or [name]-2, [name]-3 and so on. */
+private fun freeFolder(parent: File, name: String): File {
+    var candidate = File(parent, name)
+    var n = 2
+    while (candidate.exists()) candidate = File(parent, "$name-${n++}")
+    return candidate
+}
+
 private fun readPrograms(container: Container): List<LinuxProgram> {
     val files = container.desktopDir.listFiles { f -> f.name.endsWith(".desktop") } ?: return emptyList()
     return files.sortedBy { it.name.lowercase(Locale.ROOT) }.map { file ->
@@ -163,6 +174,17 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     var pendingCopy by remember { mutableStateOf<File?>(null) }
     var pendingCopySize by remember { mutableStateOf(0L) }
     var copying by remember { mutableStateOf(false) }
+    var nameClash by remember { mutableStateOf<NameClash?>(null) }
+
+    /** Adds the shortcut, or asks for another name when this one is taken: two games can share an executable's name. */
+    fun addProgram(name: String, path: String) {
+        if (ContainerManager.linuxShortcutExists(container, name)) {
+            nameClash = NameClash(name, path)
+        } else {
+            ContainerManager.addLinuxShortcut(container, name, path)
+            tick++
+        }
+    }
 
     fun start(program: LinuxProgram) {
         context.startActivity(
@@ -195,8 +217,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         }
         if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) != LinuxEmulator.NONE) {
             // An x86-64 program is read by the emulator, not run by the kernel, so it can stay on shared storage.
-            ContainerManager.addLinuxShortcut(container, file.nameWithoutExtension, file.path)
-            tick++
+            addProgram(file.nameWithoutExtension, file.path)
             return@rememberLauncherForActivityResult
         }
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.
@@ -307,11 +328,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = valid, onClick = {
-                    ContainerManager.addLinuxShortcut(
-                        container, name.trim().ifEmpty { File(path.trim()).name }, path.trim()
-                    )
+                    addProgram(name.trim().ifEmpty { File(path.trim()).name }, path.trim())
                     pathDialog = false
-                    tick++
                 }) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { pathDialog = false }) { Text("Cancel") } }
@@ -334,7 +352,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                     pendingCopy = null
                     copying = true
                     Executors.newSingleThreadExecutor().execute {
-                        val target = File(File(container.linuxHomeDir, "programs"), folder.name)
+                        // Another version of the game may already sit in a folder of this name: do not overwrite it.
+                        val programs = File(container.linuxHomeDir, "programs")
+                        val target = freeFolder(programs, folder.name)
                         var ok = false
                         try {
                             ok = FileUtils.copy(folder, target, Callback<File> { copied -> FileUtils.chmod(copied, 505) /* octal 0771 */ })
@@ -344,10 +364,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                         main.post {
                             copying = false
                             if (ok) {
-                                ContainerManager.addLinuxShortcut(
-                                    container, file.nameWithoutExtension, "/root/programs/${folder.name}/${file.name}"
-                                )
-                                tick++
+                                addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/${file.name}")
                             } else {
                                 Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
                             }
@@ -356,6 +373,38 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 }) { Text("Copy") }
             },
             dismissButton = { TextButton(onClick = { pendingCopy = null }) { Text("Cancel") } }
+        )
+    }
+
+    nameClash?.let { clash ->
+        // Offer a free name to start from: "Name (2)", "Name (3)" ...
+        var newName by remember(clash) {
+            var n = 2
+            while (ContainerManager.linuxShortcutExists(container, "${clash.name} ($n)")) n++
+            mutableStateOf("${clash.name} ($n)")
+        }
+        val taken = ContainerManager.linuxShortcutExists(container, newName.trim())
+        AlertDialog(
+            onDismissRequest = { nameClash = null },
+            title = { Text("This program already exists") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("A shortcut named \"${clash.name}\" is already in this container. Give the new one a name.")
+                    OutlinedTextField(
+                        newName, { newName = it },
+                        label = { Text("Name") }, singleLine = true, isError = taken
+                    )
+                    if (taken) Text("This name is taken.", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = newName.isNotBlank() && !taken, onClick = {
+                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path)
+                    nameClash = null
+                    tick++
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { nameClash = null }) { Text("Cancel") } }
         )
     }
 

@@ -90,6 +90,8 @@ public class OnboardingActivity extends AppCompatActivity {
     private static final int REQUEST_LOCAL_LINUX_DRIVER = 825;
     private static final String LINUX_DRIVER_PREFIX = "linux-driver:";
     private static final String LINUX_EMULATOR_PREFIX = "linux-emulator:";
+    /** A driver of the registry that is not installed yet (an installed one is LINUX_DRIVER_PREFIX + its folder id). */
+    private static final String LINUX_DRIVER_DOWNLOAD_PREFIX = "linux-driver-download:";
 
     private final OkHttpClient http = new OkHttpClient();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -97,6 +99,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private final ArrayList<RemoteDriverCatalog.Entry> remoteDrivers = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRuntimes = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxEmulators = new ArrayList<>();
+    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxDrivers = new ArrayList<>();
 
     private SharedPreferences preferences;
     private ContentsManager contentsManager;
@@ -148,6 +151,7 @@ public class OnboardingActivity extends AppCompatActivity {
                         else if (componentId.startsWith("remote-driver:")) installRemoteDriver(componentId);
                         else if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) installLinuxRuntime(componentId);
                         else if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) installLinuxEmulator(componentId);
+                        else if (componentId.startsWith(LINUX_DRIVER_DOWNLOAD_PREFIX)) installLinuxDriver(componentId);
                     }
 
                     @Override
@@ -567,11 +571,23 @@ public class OnboardingActivity extends AppCompatActivity {
                     null, false, true
             ));
         }
+        Set<String> installedDriverNames = new HashSet<>();
         for (LinuxDriverManager.Installed driver : LinuxDriverManager.list(this)) {
+            installedDriverNames.add(driver.name);
             ui.add(new OnboardingComponent(
                     LINUX_DRIVER_PREFIX + driver.id, "Linux Driver", driver.label(), true, false, true,
                     null, LinuxDriverManager.containerUsing(this, driver.id) != null, false
             ));
+        }
+        synchronized (linuxDrivers) {
+            for (LinuxRuntimeCatalog.Entry driver : linuxDrivers) {
+                if (installedDriverNames.contains(driver.name)) continue;
+                ui.add(new OnboardingComponent(
+                        LINUX_DRIVER_DOWNLOAD_PREFIX + driver.id, "Linux Driver", driver.name, false, false, false,
+                        null, false, false, driver.channel,
+                        formatSizeSmall(driver.size) + " download", false, false
+                ));
+            }
         }
         composeController.setComponents(ui);
         refreshBundledRuntimeState();
@@ -852,14 +868,86 @@ public class OnboardingActivity extends AppCompatActivity {
 
     private void loadLinuxEmulators() {
         io.execute(() -> {
-            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetchEmulators();
-            if (loaded == null) return;
-            synchronized (linuxEmulators) {
-                linuxEmulators.clear();
-                linuxEmulators.addAll(loaded);
+            List<LinuxRuntimeCatalog.Entry> drivers = LinuxRuntimeCatalog.fetchDrivers();
+            if (drivers != null) {
+                synchronized (linuxDrivers) {
+                    linuxDrivers.clear();
+                    linuxDrivers.addAll(drivers);
+                }
             }
-            runOnUiThread(this::syncComposeCatalog);
+            List<LinuxRuntimeCatalog.Entry> loaded = LinuxRuntimeCatalog.fetchEmulators();
+            if (loaded != null) {
+                synchronized (linuxEmulators) {
+                    linuxEmulators.clear();
+                    linuxEmulators.addAll(loaded);
+                }
+            }
+            android.util.Log.d("OnboardingActivity", "Linux catalog: " + (drivers == null ? "no" : drivers.size()) + " drivers, "
+                    + (loaded == null ? "no" : loaded.size()) + " emulators");
+            if (drivers != null || loaded != null) runOnUiThread(this::syncComposeCatalog);
         });
+    }
+
+    private static String formatSizeSmall(long bytes) {
+        if (bytes >= (1L << 20)) return String.format(Locale.US, "%.1f MB", bytes / (double)(1L << 20));
+        return Math.max(1, bytes >> 10) + " KB";
+    }
+
+    /** Downloads a driver zip of the registry, checks its SHA-256 and installs it like a driver imported from a file. */
+    private void installLinuxDriver(String componentId) {
+        if (installBusy) return;
+        LinuxRuntimeCatalog.Entry found = null;
+        synchronized (linuxDrivers) {
+            for (LinuxRuntimeCatalog.Entry driver : linuxDrivers) {
+                if ((LINUX_DRIVER_DOWNLOAD_PREFIX + driver.id).equals(componentId)) found = driver;
+            }
+        }
+        if (found == null) return;
+        final LinuxRuntimeCatalog.Entry entry = found;
+        installBusy = true;
+        composeController.setInstallBusy(componentId, true);
+        composeController.updateInstallProgress("Preparing " + entry.name, 0);
+        io.execute(() -> {
+            File archive = new File(getCacheDir(), "linux-driver-" + System.nanoTime() + ".zip");
+            String error = null;
+            try {
+                if (!download(entry.url, archive, entry.name)) {
+                    error = "Download failed";
+                }
+                else if (!entry.sha256.equalsIgnoreCase(sha256Of(archive))) {
+                    error = "Checksum mismatch";
+                }
+                else {
+                    postInstallProgress("Installing " + entry.name, -1);
+                    error = LinuxDriverManager.install(this, Uri.fromFile(archive), entry.id + ".zip").error;
+                }
+            }
+            catch (Exception e) {
+                error = "Unable to install " + entry.name;
+            }
+            finally {
+                archive.delete();
+            }
+            final String message = error;
+            runOnUiThread(() -> {
+                installBusy = false;
+                composeController.setInstallBusy(null, false);
+                syncComposeCatalog();
+                if (message != null) Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            });
+        });
+    }
+
+    private static String sha256Of(File file) throws Exception {
+        java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+        try (InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte b : digest.digest()) hex.append(String.format("%02x", b));
+        return hex.toString();
     }
 
     private void installLinuxEmulator(String componentId) {

@@ -181,11 +181,20 @@ public class ContainerManager {
         addLinuxShortcut(container, "vkcube", "/usr/bin/vkcube");
     }
 
+    /** The shortcut file a Linux program of this name would get (the name decides the file, so two programs cannot share it). */
+    public static File linuxShortcutFile(Container container, String name) {
+        return new File(container.getDesktopDir(), name.replace('/', '_') + ".desktop");
+    }
+
+    public static boolean linuxShortcutExists(Container container, String name) {
+        return linuxShortcutFile(container, name).exists();
+    }
+
     /** Writes a shortcut for a program at {@code path} (as the guest sees it) into the container's Desktop. */
     public static File addLinuxShortcut(Container container, String name, String path) {
         File dir = container.getDesktopDir();
         dir.mkdirs();
-        File file = new File(dir, name.replace('/', '_') + ".desktop");
+        File file = linuxShortcutFile(container, name);
         FileUtils.writeString(file,
                 "[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
         return file;
