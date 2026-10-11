@@ -254,6 +254,9 @@ public final class LinuxSession {
         // No udev runs in the session, so SDL must scan /dev/input itself instead of waiting on a monitor.
         env.put("SDL_JOYSTICK_DISABLE_UDEV", "1");
         env.put("SDL_HIDAPI_JOYSTICK_DISABLE_UDEV", "1");
+        // SDL drops joystick events while its window lacks keyboard focus, and without a window manager the
+        // core FocusIn never reaches SDL (see docs/linux-input-findings.md). Let pad events through regardless.
+        env.put("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
 
         // The X server cannot take dma-bufs yet: with this on, Vulkan copies finished frames on the CPU.
         if (!"native".equals(container.getExtra(EXTRA_VULKAN_PRESENT))) env.put("MESA_VK_WSI_DEBUG", "sw");

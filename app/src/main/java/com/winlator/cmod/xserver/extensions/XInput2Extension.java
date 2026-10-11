@@ -598,8 +598,8 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
 
                 int valuatorWords = valuators ? 1 : 0;
                 // XIDeviceEvent variable part: 4 (coords) + 2 (lens/src/pad) + 1 (flags) +
-                //   4 (mods/XIModifierState) + 4 (group/XIGroupState) + 1 (buttons[]) = 16 words.
-                int length = 16 + valuatorWords + (valuators ? 4 : 0);
+                //   4 (mods/XIModifierState) + 1 (group/XIGroupState, four bytes) + 1 (buttons[]) = 13 words.
+                int length = 13 + valuatorWords + (valuators ? 4 : 0);
                 out.writeByte((byte)GENERIC_EVENT);
                 out.writeByte(extension);
                 out.writeShort(sequenceNumber);
@@ -622,8 +622,8 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                 out.writeInt(0); // flags
                 // XIModifierState mods (4 × INT32)
                 out.writeInt(0); out.writeInt(0); out.writeInt(0); out.writeInt(mods);
-                // XIGroupState group (4 × INT32)
-                out.writeInt(0); out.writeInt(0); out.writeInt(0); out.writeInt(0);
+                // XIGroupState group (4 × CARD8)
+                out.writeInt(0);
                 out.writeInt(buttons);
                 if (valuators) {
                     out.writeInt(3);

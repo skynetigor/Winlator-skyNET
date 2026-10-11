@@ -98,6 +98,16 @@ Worth trying next:
 3. SDL asked `GetInputFocus` nine times in one run — it confirms focus by asking rather than trusting the
    event. If the core FocusIn never arrives, that polling is all it has left.
 
+## Why the pad is silent in BeamNG (hypothesis, untested on device)
+
+SDL2 drops joystick events while no window has keyboard focus (`SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS`
+defaults to off). BeamNG's window never gets `SDL_WINDOW_INPUT_FOCUS`, so a pad that SDL lists and reads is
+filtered at the last step. `LinuxSession` now sets `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1`. If the pad then
+works, focus and mouse clicks are a separate problem.
+
+Also found: the XI2 device event wrote `XIGroupState` as 16 bytes instead of 4 (framing stayed consistent, but
+the button mask and valuators were read from the wrong offsets). Fixed.
+
 ## Fixed along the way
 
 - `ButtonRelease` was looked up and delivered by the *pointer-motion* mask. A program that reads motion some
