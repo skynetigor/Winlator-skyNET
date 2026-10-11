@@ -2211,9 +2211,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             swEnableFSR.setChecked(fsrOn);
             if (spUpscalerMode != null)
                 spUpscalerMode.setVisibility(fsrOn ? View.VISIBLE : View.GONE);
-            if (fsrOn)
+            if (fsrOn) {
+                // The mode the container was saved with (SGSR 2, FSR 3, Lanczos 2 = 4, Color Boost 5), not the spinner's first item.
+                int savedMode = Integer.parseInt(savedFilter);
+                if (spUpscalerMode != null && savedMode >= 2 && savedMode - 2 < upscalerLabels.length)
+                    spUpscalerMode.setSelection(savedMode - 2);
                 vkRenderer.setFilterMode(spUpscalerMode != null
                     ? spUpscalerMode.getSelectedItemPosition() + 2 : 2);
+            }
             swEnableFSR.setOnCheckedChangeListener((btn, checked) -> {
                 if (spUpscalerMode != null)
                     spUpscalerMode.setVisibility(checked ? View.VISIBLE : View.GONE);

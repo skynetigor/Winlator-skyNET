@@ -137,6 +137,9 @@ private val SIZE_PATTERN = Regex("^\\d{3,5}x\\d{3,5}$")
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
 private val HUD_LABELS = listOf("Off", "Classic", "Modern")
 
+// The renderer's filter modes (see the sidebar): 0 is a plain scale, 2 SGSR (Qualcomm), 3 FSR 1, 4 Lanczos 2.
+private val UPSCALER_MODES = listOf("0" to "Off (plain scaling)", "2" to "SGSR (Qualcomm)", "3" to "FSR 1", "4" to "Lanczos 2")
+
 @Composable
 private fun SectionTitle(text: String) {
     Text(
@@ -189,6 +192,9 @@ private fun LinuxContainerEditor(
     }
     // Scaled to fit the window with the proportions kept; unchecked, the screen is drawn 1:1 in the middle.
     var stretched by remember { mutableStateOf(editing?.isFullscreenStretched ?: true) }
+    var upscaler by remember {
+        mutableStateOf(editing?.getExtra("graphicsFilterMode")?.takeIf { m -> UPSCALER_MODES.any { it.first == m } } ?: "0")
+    }
     var envVars by remember {
         mutableStateOf(editing?.envVars?.takeIf { it != Container.DEFAULT_ENV_VARS } ?: "")
     }
@@ -244,6 +250,7 @@ private fun LinuxContainerEditor(
         container.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset)
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
+        container.putExtra("graphicsFilterMode", upscaler)
     }
 
     fun save() {
@@ -445,6 +452,13 @@ private fun LinuxContainerEditor(
                 ) { hudMode = it.toInt() }
                 SettingsDivider()
                 SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
+                SettingsDivider()
+                // The picture is scaled by the Vulkan renderer, which "native" output uses; the CPU-copy output draws with EGL.
+                SettingMappedChoice(
+                    "Upscaler (needs native output and Fit to screen)",
+                    upscaler,
+                    UPSCALER_MODES.associateTo(LinkedHashMap<String, String>()) { it.first to it.second }
+                ) { upscaler = it }
             }
 
             SectionTitle("Environment variables")

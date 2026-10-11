@@ -93,6 +93,25 @@ int main(void) {
     DFN(vkCreateImage); DFN(vkGetImageMemoryRequirements); DFN(vkAllocateMemory); DFN(vkBindImageMemory);
     DFN(vkGetMemoryFdKHR); DFN(vkGetImageSubresourceLayout);
 
+    /* What row pitch does the driver give a linear image of each width? A consumer has to agree with it. */
+    static const int widths[] = { 500, 640, 800, 1024, 1280, 1366, 1600, 1920, 2560 };
+    for (unsigned i = 0; i < sizeof widths / sizeof *widths; i++) {
+        VkExternalMemoryImageCreateInfo e2 = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+            .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT };
+        VkImageCreateInfo i2 = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &e2, .imageType = VK_IMAGE_TYPE_2D,
+            .format = VK_FORMAT_B8G8R8A8_UNORM, .extent = { widths[i], 600, 1 }, .mipLevels = 1, .arrayLayers = 1,
+            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_LINEAR,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
+        VkImage im;
+        if (vkCreateImage(dev, &i2, NULL, &im) != VK_SUCCESS) { printf("width %d: create failed\n", widths[i]); continue; }
+        VkImageSubresource sb = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
+        VkSubresourceLayout ly;
+        vkGetImageSubresourceLayout(dev, im, &sb, &ly);
+        VkMemoryRequirements rq;
+        vkGetImageMemoryRequirements(dev, im, &rq);
+        printf("width %4d: row pitch %5llu (width*4 = %d), memory %llu\n", widths[i], (unsigned long long)ly.rowPitch, widths[i] * 4, (unsigned long long)rq.size);
+    }
+
     for (int handleKind = 0; handleKind < 2; handleKind++) {
         VkExternalMemoryHandleTypeFlagBits type = handleKind ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
                                                               : VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;

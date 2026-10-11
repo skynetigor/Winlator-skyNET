@@ -230,6 +230,8 @@ private:
         bool                 isAHB          = false;
         bool                 needsTransition = false;
         AHardwareBuffer*     ahb            = nullptr;
+        bool                 stgBorrowed    = false;  // stg belongs to dmaBufSrcCache, not to this texture
+        int                  rowPx          = 0;      // pixels per source row when stg is a dma-buf (0: tightly packed)
     };
     struct RetiredTex {
         WinTex wt;
@@ -245,6 +247,7 @@ private:
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
         bool            isAHB          = false;
+        int             rowPx          = 0;
     };
 
     struct WinNode {
@@ -440,7 +443,14 @@ public:
 
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
-    bool  importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int stride, int offset);
+    enum class DmaImport { Ok, Failed, PitchMismatch };
+    DmaImport importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int stride, int offset);
+    // A dma-buf whose row pitch the driver would not lay an image out with: imported as a buffer and copied into
+    // an ordinary image on the GPU every frame, which takes any pitch.
+    struct DmaBufSrc { VkBuffer buf = VK_NULL_HANDLE; VkDeviceMemory mem = VK_NULL_HANDLE; int rowPx = 0; };
+    bool  importDmaBufAsBuffer(DmaBufSrc& src, int fd, int h, int stride, int offset);
+    std::unordered_map<AHardwareBuffer*, DmaBufSrc>            dmaBufSrcCache;
+    std::unordered_map<int64_t, std::vector<AHardwareBuffer*>> windowDmaSrcs;
     bool  hasDmaBufImport = false;
     // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
     std::unordered_set<AHardwareBuffer*> dmaBufKeys;
