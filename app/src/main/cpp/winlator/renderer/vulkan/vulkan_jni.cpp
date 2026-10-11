@@ -137,6 +137,15 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentAHB(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeUpdateWindowContentDmaBuf(
+    JNIEnv*, jobject, jlong handle, jlong id, jint key, jint fd,
+    jint w, jint h, jint stride, jint offset)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->updateWindowContentDmaBuf(id, key, fd, w, h, stride, offset);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetTransformAndScissor(
     JNIEnv*, jobject, jlong handle,
     jfloat ox, jfloat oy, jfloat sx, jfloat sy,

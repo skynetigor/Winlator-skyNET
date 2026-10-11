@@ -94,6 +94,8 @@ struct VkTable {
     PFN_vkGetFenceStatus GetFenceStatus;
 
     PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
+    PFN_vkGetMemoryFdPropertiesKHR GetMemoryFdPropertiesKHR;
+    PFN_vkGetImageSubresourceLayout GetImageSubresourceLayout;
 };
 
 #include <android/log.h>
@@ -108,6 +110,7 @@ struct VkTable {
 #include <jni.h>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <utility>
 #include <thread>
@@ -164,6 +167,8 @@ public:
     void updatePointerPosition(short x, short y);
     void updateWindowContent(int64_t id, void* pixels, short w, short h, short stride, int x, int y);
     void updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short w, short h, int x, int y);
+    // A frame a Linux client rendered into a dma-buf (DRI3). [key] names the buffer (its pixmap) across frames.
+    void updateWindowContentDmaBuf(int64_t id, int key, int fd, int w, int h, int stride, int offset);
     void updateCursorImage(void* pixels, short w, short h, short stride, short hotX, short hotY);
     void setCursorVisible(bool visible);
     void setRenderList(const int64_t* ids, const int* xs, const int* ys, int count);
@@ -435,6 +440,11 @@ public:
 
     bool  createWinTexResources(WinTex& wt, int w, int h);
     bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
+    bool  importDmaBufToWinTex(WinTex& wt, int fd, int w, int h, int stride, int offset);
+    bool  hasDmaBufImport = false;
+    // Stand-ins for an AHardwareBuffer in ahbImportCache: never dereferenced, never released.
+    std::unordered_set<AHardwareBuffer*> dmaBufKeys;
+    void releaseAhbKey(AHardwareBuffer* key) { if (key && !dmaBufKeys.erase(key)) AHardwareBuffer_release(key); }
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();
     void  destroyTexNow(RetiredTex& retired);

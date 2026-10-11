@@ -23,6 +23,10 @@ public class Drawable extends XResource {
     
     private GPUImage gpuImage = null;
     private boolean directScanout;
+    /** A frame a Linux client rendered into a dma-buf (DRI3): the descriptor, kept open while the pixmap lives. */
+    public int dmaBufFd = -1;
+    public int dmaBufStride;
+    public int dmaBufOffset;
     private Runnable onDrawListener;
     private Callback<Drawable> onDestroyListener;
     private boolean offscreen = false;

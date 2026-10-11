@@ -117,6 +117,8 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         ByteBuffer pixels, short width, short height, short stride, int x, int y);
+    @FastNative private native void nativeUpdateWindowContentDmaBuf(long handle, long id, int key, int fd,
+        int w, int h, int stride, int offset);
     @FastNative private native void nativeUpdateWindowContentAHB(long handle, long id,
         long ahbPtr, short width, short height, int x, int y);
     @FastNative private native void nativeSetTransformAndScissor(long handle,
@@ -483,7 +485,11 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             if (nativeHandle == 0 || pixmap == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
-                if (pixmap.backingAHB != 0) {
+                if (pixmap.dmaBufFd >= 0) {
+                    nativeUpdateWindowContentDmaBuf(nativeHandle, did(window.getContent()), pixmap.id,
+                        pixmap.dmaBufFd, pixmap.width, pixmap.height, pixmap.dmaBufStride, pixmap.dmaBufOffset);
+                }
+                else if (pixmap.backingAHB != 0) {
                     nativeUpdateWindowContentAHB(nativeHandle, did(window.getContent()),
                         pixmap.backingAHB, pixmap.width, pixmap.height, rx, ry);
                 }

@@ -613,7 +613,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Like a real X server, start with the focus on PointerRoot, not None.
             xServer.windowManager.setFocus(xServer.windowManager.rootWindow, WindowManager.FocusRevertTo.POINTER_ROOT);
             xServer.extensions.remove(MITSHMExtension.MAJOR_OPCODE);
-            xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
+            // Only "native" output talks DRI3 (a client hands over dma-bufs); the default draws on the CPU, which Mesa
+            // picks by itself when the extension is missing.
+            if (!"native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT))) {
+                xServer.extensions.remove(DRI3Extension.MAJOR_OPCODE);
+            }
         }
         xServer.setRelativeMouseMovement(isRelativeMouseMovement);
         advertisePanelRefreshRates();
@@ -621,8 +625,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean[] winStarted = { false };
 
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
-            @Override
-            public void onUpdateWindowContent(Window window) {
+            private void onApplicationWindowDrawn(Window window) {
                 if (!winStarted[0] && isSessionApplicationWindow(window)) {
                     if (!simulateTouchScreen && !preferences.getBoolean("touchscreen_toggle", false)) {
                         // A finger is its own pointer, in either direct-touch mode: no cursor to draw.
@@ -631,6 +634,25 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     preloaderDialog.closeOnUiThread();
                     winStarted[0] = true;
                 }
+            }
+
+            @Override
+            public void onUpdateWindowContentDirect(Window window, com.winlator.cmod.xserver.Drawable drawable) {
+                // A frame handed over as a dma-buf (or a hardware buffer) is the program drawing too. The renderer
+                // counts the frame for the HUD itself; what is left to do is to pick the window it counts.
+                onApplicationWindowDrawn(window);
+                if (frameRatingWindowId == -1 && lastRendererName != null && isSessionApplicationWindow(window)
+                        && ((modernHud != null && modernHud.isUserEnabled())
+                         || (classicHud != null && classicHud.getVisibility() == View.VISIBLE))) {
+                    frameRatingWindowId = window.id;
+                    activeRendererWindowId = window.id;
+                    if (xServerView != null) xServerView.setFpsWindowId(window.id);
+                }
+            }
+
+            @Override
+            public void onUpdateWindowContent(Window window) {
+                onApplicationWindowDrawn(window);
 
                 if (frameRatingWindowId == window.id) {
                     if (classicHud != null) classicHud.update();
@@ -1400,7 +1422,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean useDisplayX = isDisplayXEnabled();
 
         // The Vulkan renderer loads a bionic driver prepared for Wine containers, so Linux sessions use EGL.
-        boolean useEGL = !useDisplayX && (linuxSession || (shortcut != null ? shortcut.getRendererNative()
+        // "Native" Vulkan output hands frames over as dma-bufs, which only the Vulkan renderer can import.
+        boolean linuxNativeOutput = linuxSession && container != null
+                && "native".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_VULKAN_PRESENT));
+        boolean useEGL = !useDisplayX && ((linuxSession && !linuxNativeOutput) || (shortcut != null ? shortcut.getRendererNative()
                 : (container != null && container.getRendererNative())));
 
         if (useDisplayX || useEGL) {

@@ -1,6 +1,7 @@
 package com.winlator.cmod.xserver.extensions;
 
 import android.util.Log;
+import android.system.Os;
 import android.util.SparseArray;
 import com.winlator.cmod.renderer.GPUImage;
 
@@ -45,6 +46,7 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
         private static final byte QUERY_VERSION = 0;
         private static final byte OPEN = 1;
         private static final byte PIXMAP_FROM_BUFFER = 2;
+        private static final byte FENCE_FROM_FD = 4;
         private static final byte GET_SUPPORTED_MODIFIERS = 6;
         private static final byte PIXMAP_FROM_BUFFERS = 7;
     }
@@ -88,6 +90,37 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
         }
     }
 
+    private boolean isLinuxClient() {
+        return xServer.getExtension(XInput2Extension.MAJOR_OPCODE) != null;
+    }
+
+    /** A Wine client hands over a socket that carries an AHardwareBuffer; a Linux one hands over a dma-buf. */
+    private static boolean isSocket(int fd) {
+        try {
+            return Os.readlink("/proc/self/fd/" + fd).startsWith("socket:");
+        }
+        catch (Exception e) {
+            return true;
+        }
+    }
+
+    private void fenceFromFd(XClient client, XInputStream inputStream) throws XRequestError {
+        int drawableId = inputStream.readInt();
+        int fenceId = inputStream.readInt();
+        boolean initiallyTriggered = inputStream.readByte() == 1;
+        inputStream.skip(3);
+
+        int fd = inputStream.getAncillaryFd();
+        try {
+            SyncExtension sync = client.xServer.getExtension(SyncExtension.MAJOR_OPCODE);
+            if (sync == null || fd < 0) throw new BadImplementation();
+            sync.createShmFence(fenceId, drawableId, fd, initiallyTriggered);
+        }
+        finally {
+            if (fd >= 0) XConnectorEpoll.closeFd(fd);
+        }
+    }
+
     private void getSupportedModifiers(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         int windowId = inputStream.readInt();
         inputStream.skip(4);
@@ -95,15 +128,22 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
         Window window = client.xServer.windowManager.getWindow(windowId);
         if (window == null) throw new BadWindow(windowId);
 
+        // Linux clients: linear only. Nothing here reads a tiled or compressed (UBWC) layout.
+        boolean linear = isLinuxClient();
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
             outputStream.writeByte((byte)0);
             outputStream.writeShort(client.getSequenceNumber());
-            outputStream.writeInt(0);
-            outputStream.writeInt(0);
-            outputStream.writeInt(0);
+            outputStream.writeInt(linear ? 4 : 0);
+            outputStream.writeInt(linear ? 1 : 0);
+            outputStream.writeInt(linear ? 1 : 0);
             outputStream.writePad(16);
+            if (linear) {
+                outputStream.writeLong(0L);  // DRM_FORMAT_MOD_LINEAR for the window
+                outputStream.writeLong(0L);  // and for the screen
+            }
         }
+        Log.d("Dri3", "GetSupportedModifiers window " + windowId + " -> " + (linear ? "linear" : "none"));
     }
 
     private void open(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
@@ -170,8 +210,36 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
         if (pixmap != null) throw new BadIdChoice(pixmapId);
 
         int fd = inputStream.getAncillaryFd();
+        if (isLinuxClient() && !isSocket(fd)) {
+            pixmapFromDmaBuf(client, pixmapId, window, width, height, stride, offset, depth, modifiers, fd);
+            return;
+        }
         Log.d("Dri3", "Importing buffer as AHardwareBuffer (modifier=" + modifiers + ")");
         pixmapFromHardwareBuffer(client, pixmapId, width, height, depth, fd, window);
+    }
+
+    private void pixmapFromDmaBuf(XClient client, int pixmapId, Window window, short width, short height, int stride, int offset, byte depth, long modifier, int fd) throws XRequestError {
+        boolean keepFd = false;
+        try {
+            String link = "?";
+            try { link = Os.readlink("/proc/self/fd/" + fd); } catch (Exception ignored) {}
+            Log.d("Dri3", "dma-buf pixmap " + pixmapId + " " + width + "x" + height + " stride " + stride + " offset " + offset
+                    + " depth " + depth + " modifier " + modifier + " fd " + link);
+            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, depth);
+            drawable.setDirectScanout(true);
+            drawable.setOnDrawListener(() -> client.xServer.windowManager.triggerOnUpdateWindowContentDirect(window, drawable));
+            // The renderer imports the dma-buf itself on the first frame; the pixmap keeps the descriptor until it is freed.
+            drawable.dmaBufFd = fd;
+            drawable.dmaBufStride = stride;
+            drawable.dmaBufOffset = offset;
+            keepFd = true;
+            Pixmap pixmap = client.xServer.pixmapManager.createPixmap(drawable);
+            client.registerAsOwnerOfResource(pixmap);
+            directContents.put(pixmap.id, new DirectContent(window, pixmap));
+        }
+        finally {
+            if (!keepFd) XConnectorEpoll.closeFd(fd);
+        }
     }
 
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd, Window window) throws IOException, XRequestError {
@@ -210,6 +278,9 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
                     pixmapFromBuffer(client, inputStream, outputStream);
                 }
                 break;
+            case ClientOpcodes.FENCE_FROM_FD:
+                fenceFromFd(client, inputStream);
+                break;
             case ClientOpcodes.GET_SUPPORTED_MODIFIERS:
                 try (XLock lock = client.xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
                     getSupportedModifiers(client, inputStream, outputStream);
@@ -229,6 +300,10 @@ public class DRI3Extension implements Extension, XResourceManager.OnResourceLife
     public void onFreeResource(XResource resource) {
         if (resource instanceof Pixmap) {
             Pixmap pixmap = (Pixmap)resource;
+            if (pixmap.drawable != null && pixmap.drawable.dmaBufFd >= 0) {
+                XConnectorEpoll.closeFd(pixmap.drawable.dmaBufFd);
+                pixmap.drawable.dmaBufFd = -1;
+            }
             DirectContent content = directContents.get(pixmap.id);
             if (content != null) {
                 xServer.getXServerView().nativeRemoveDirectContent(content.window.id, pixmap.id);

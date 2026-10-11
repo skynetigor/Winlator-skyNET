@@ -42,6 +42,8 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
     private final SparseArray<Event> events = new SparseArray<>();
     private SyncExtension syncExtension;
     private XServer xServer;
+    private int presentCount;
+    private long presentWindowStart = System.nanoTime();
     private final Object limiterLock = new Object();
     private HashMap<Integer, Long> limiterDeadlines;
     private ScheduledThreadPoolExecutor limiterExecutor;
@@ -194,6 +196,16 @@ public class PresentExtension implements Extension, XResourceManager.OnResourceL
 
         final Pixmap pixmap = client.xServer.pixmapManager.getPixmap(pixmapId);
         if (pixmap == null) throw new BadPixmap(pixmapId);
+
+        if (com.winlator.cmod.xserver.XClientRequestHandler.trace) {
+            presentCount++;
+            long now = System.nanoTime();
+            if (now - presentWindowStart >= 1_000_000_000L) {
+                Log.d("Present", presentCount + " presents in " + (now - presentWindowStart) / 1_000_000 + " ms");
+                presentCount = 0;
+                presentWindowStart = now;
+            }
+        }
 
         int targetFps = client.xServer.getXServerView() != null
                 ? client.xServer.getXServerView().getFpsLimit() : 0;
