@@ -6,10 +6,24 @@ the plan from here.
 
 ## In one paragraph
 
-FEX 2610 runs under proot, and the Vulkan thunk gives a game the container's Turnip. BeamNG 0.34 and 0.39 start,
-load their Lua engines and read their data. They stop because the game's embedded Chromium (CEF, the menu) cannot start
-its helper process: FEX turns the game's `execve` into `execveat`, and the runtime's proot refuses that call. The same
-game works under Box64. Fixing proot is the one blocker left; everything else below is solved or has a workaround.
+**Update (2026-10-12, later): BeamNG 0.39 runs on FEX**, from the first-run screens through the main menu into West Coast USA,
+about 27 FPS GPU-bound (Box64 gave about 34 on the same map). It had stopped at the game's CEF menu for two reasons, both
+fixed now:
+
+1. proot refuses `execveat` with a directory descriptor, which FEX uses to start a program and a guest's `fexecve` reaches.
+   `libskyshim` (aarch64) now turns `execveat`/`fexecve`/`syscall(SYS_execveat)` into an `execve` of the path the descriptor names
+   (`/proc/self/fd/N`). No proot rebuild was needed.
+2. FEX looks a path up in the root filesystem first, and its `/proc`, `/sys` and `/dev` are empty folders. Chromium opens
+   "/proc" and stats "self/task/" inside it (its sandbox check, and so every helper process, died on that), which found
+   nothing. The session now binds the real `/proc`, `/sys`, `/dev`, `/dev/shm` and `/dev/input` over the root filesystem's
+   (`LinuxSession.build`).
+
+The program is still copied into the container (shared storage is noexec for FEX): "Program only" copy of BinLinux with the
+data bound in. The `ld.so ... cannot be preloaded` lines in the game's log are the host's loader refusing the guest's x86-64
+`LD_PRELOAD` in FEX's own processes; they are harmless. What is left: the Lua error about
+`/sys/class/power_supply/BAT0` (permission denied) when the menu opens, and the speed.
+
+(The text below is what was known before.)
 
 ## What works
 

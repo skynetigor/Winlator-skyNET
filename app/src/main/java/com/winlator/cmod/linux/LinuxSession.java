@@ -345,6 +345,22 @@ public final class LinuxSession {
         bind(argv, cacheDir.getPath());
         bind(argv, imageFsRoot.getPath());
         bind(argv, "/storage/emulated/0");
+        // FEX looks a path up in the x86-64 root filesystem first, and that has /proc, /sys and /dev as empty folders: a path
+        // given whole (/proc/self/task) falls through to the phone's, but one opened as a directory and then looked into
+        // (Chromium opens "/proc" and stats "self/task/" in it; its sandbox check dies on that) finds nothing. The real
+        // ones are put over the root filesystem's, as a chroot would have them mounted.
+        LinuxEmulator.Installed fexEmulator = LinuxEmulator.resolve(context, container);
+        if (fexEmulator != null && fexEmulator.emulator.equals(LinuxEmulator.FEX)) {
+            LinuxRootfs.Installed x86Root = LinuxRootfs.resolve(context, container);
+            if (x86Root != null) {
+                String root = x86Root.dir.getPath();
+                bind(argv, "/proc", root + "/proc");
+                bind(argv, "/sys", root + "/sys");
+                bind(argv, "/dev", root + "/dev");
+                bind(argv, shmDir.getPath(), root + "/dev/shm");
+                bind(argv, inputDir.getPath(), root + "/dev/input");
+            }
+        }
         bind(argv, home.getPath(), "/root");
         bindDataFolders(argv, home);
         bind(argv, new File(imageFsRoot, "usr/tmp/.X11-unix").getPath(), "/tmp/.X11-unix");

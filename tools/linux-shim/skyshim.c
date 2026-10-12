@@ -14,7 +14,8 @@
  * and spawn functions put it in front of any program whose ELF header says x86-64.
  *
  * Interposed: socket, bind, getsockname, setsockopt, getsockopt, close, open, open64, stat, stat64, lstat, lstat64,
- * ioctl, read, and (aarch64) execve, execv, execvp, execvpe, execl, execlp, execle, posix_spawn, posix_spawnp.
+ * ioctl, read, and (aarch64) execve, execv, execvp, execvpe, execl, execlp, execle, execveat, fexecve, syscall (only for
+ * execveat), posix_spawn, posix_spawnp.
  * Everything else goes to libc unchanged.
  *
  * MIT licence, written for this project.
@@ -510,6 +511,64 @@ int execle(const char *path, const char *arg, ...) {
     int result = execve(path, list, envp);
     int saved = errno; free(list); errno = saved;
     return result;
+}
+
+/* ---- execveat with a descriptor ------------------------------------------------------------------------------------------
+ * proot (the Termux build in the runtime) refuses execveat unless its directory descriptor is AT_FDCWD: "execveat() with
+ * non-AT_FDCWD fd is not currently supported". FEX runs a program by re-executing itself through execveat, and a guest's own
+ * fexecve (Chromium's helper processes) reaches it the same way. Here the call is turned into an execve of the path the
+ * descriptor names (/proc/self/fd/N), which proot handles. A descriptor without a path (a memfd) cannot be run this way. */
+static int path_of_fd(int fd, char *out, size_t size) {
+    char link[64];
+    snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
+    ssize_t n = readlink(link, out, size - 1);
+    if (n <= 0) return -1;
+    out[n] = 0;
+    return 0;
+}
+
+static long execveat_by_path(int dirfd, const char *path, char *const argv[], char *const envp[], int flags) {
+    static long (*real)(long, ...);
+    if (!real) real = (long (*)(long, ...))dlsym(RTLD_NEXT, "syscall");
+    if (dirfd == AT_FDCWD && !(flags & AT_EMPTY_PATH)) return real(SYS_execveat, dirfd, path, argv, envp, flags);
+
+    char target[4096];
+    if (flags & AT_EMPTY_PATH && (!path || !*path)) {
+        if (path_of_fd(dirfd, target, sizeof target) < 0) { errno = ENOENT; return -1; }
+    } else if (path && path[0] == '/') {
+        snprintf(target, sizeof target, "%s", path);
+    } else if (path) {
+        char base[4096];
+        if (dirfd == AT_FDCWD) snprintf(target, sizeof target, "%s", path);
+        else if (path_of_fd(dirfd, base, sizeof base) < 0) { errno = ENOENT; return -1; }
+        else snprintf(target, sizeof target, "%s/%s", base, path);
+    } else {
+        errno = EFAULT;
+        return -1;
+    }
+    return execve(target, argv, envp);
+}
+
+int execveat(int dirfd, const char *path, char *const argv[], char *const envp[], int flags) {
+    return (int)execveat_by_path(dirfd, path, argv, envp, flags);
+}
+
+int fexecve(int fd, char *const argv[], char *const envp[]) {
+    return (int)execveat_by_path(fd, "", argv, envp, AT_EMPTY_PATH);
+}
+
+/* FEX calls the system call through libc's syscall(): intercept that one number. */
+long syscall(long number, ...) {
+    static long (*real)(long, ...);
+    if (!real) real = (long (*)(long, ...))dlsym(RTLD_NEXT, "syscall");
+    va_list ap;
+    va_start(ap, number);
+    long a1 = va_arg(ap, long), a2 = va_arg(ap, long), a3 = va_arg(ap, long), a4 = va_arg(ap, long), a5 = va_arg(ap, long),
+         a6 = va_arg(ap, long);
+    va_end(ap);
+    if (number == SYS_execveat)
+        return execveat_by_path((int)a1, (const char *)a2, (char *const *)a3, (char *const *)a4, (int)a5);
+    return real(number, a1, a2, a3, a4, a5, a6);
 }
 
 typedef int (*spawn_fn)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *,
