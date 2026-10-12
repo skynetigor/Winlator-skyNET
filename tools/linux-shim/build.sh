@@ -13,3 +13,6 @@ ls -l libcefnosb_x64.so
 # gamepad (and the uevent socket) need the same shim built for that architecture.
 $ZIG cc -target x86_64-linux-gnu.2.17 -shared -fPIC -O2 -Wall -o libskyshim_x64.so skyshim.c -ldl
 ls -l libskyshim_x64.so
+# A game that ships mimalloc (BeamNG 0.39): its mi_* functions on plain malloc, installed as libmimalloc.so.3 (the soname).
+$ZIG cc -target x86_64-linux-gnu.2.17 -shared -fPIC -O2 -Wall -o libmimalloc_compat_x64.so mimalloc_compat.c -lpthread
+ls -l libmimalloc_compat_x64.so

@@ -118,6 +118,9 @@ public class XOutputStream {
                 long extra = (buffer.get(start + offset + 4) & 0xffL) | ((buffer.get(start + offset + 5) & 0xffL) << 8)
                         | ((buffer.get(start + offset + 6) & 0xffL) << 16) | ((buffer.get(start + offset + 7) & 0xffL) << 24);
                 text.append(" extra=").append(extra);
+                StringBuilder hex = new StringBuilder(" hex=");
+                for (int i = 0; i < 48 && offset + i < buffer.remaining(); i++) hex.append(String.format("%02x", buffer.get(start + offset + i) & 0xff));
+                text.append(hex);
                 size = (int)Math.min(Integer.MAX_VALUE / 2, 32 + extra * 4);
             }
             text.append(']');

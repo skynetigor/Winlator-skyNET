@@ -171,16 +171,9 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
                     outputStream.writePad(20);
                 }
                 break;
-            case 2: // XListInputDevices (XI 1.x): none, XI2 clients use XIQueryDevice
+            case 2: // XListInputDevices (XI 1.x): the two master devices, no input classes
                 client.skipRequest();
-                try (XStreamLock lock = outputStream.lock()) {
-                    outputStream.writeByte(RESPONSE_CODE_SUCCESS);
-                    outputStream.writeByte((byte)2); // reply type: ListInputDevices
-                    outputStream.writeShort(client.getSequenceNumber());
-                    outputStream.writeInt(0);
-                    outputStream.writeByte((byte)0); // no devices
-                    outputStream.writePad(23);
-                }
+                listInputDevices(client, outputStream);
                 break;
             case Minor.QUERY_VERSION:
                 queryVersion(client, inputStream, outputStream);
@@ -373,6 +366,46 @@ public class XInput2Extension implements Extension, XResourceManager.OnResourceL
         int size = 12 + padded(name.length());
         size += pointer ? (3 + MAX_BUTTONS) * 4 + 2 * 44 : (2 + 248) * 4;
         return size;
+    }
+
+    /**
+     * XI 1.x ListInputDevices: devices (8 bytes each), their classes (none here) and the names (a length byte and the
+     * characters, no padding between them). Two readers disagree about an empty list, so the list is never empty:
+     * libXi (Steam's own windows, SDL) does not read the data of a reply that has no devices, and Chromium (the web
+     * helper, every CEF) wants the reply's length to cover one byte past the names, rounded up to a word.
+     */
+    private void listInputDevices(XClient client, XOutputStream outputStream) throws IOException {
+        final String[] names = {"Virtual core pointer", "Virtual core keyboard"};
+        final int[] ids = {DEVICE_MASTER_POINTER, DEVICE_MASTER_KEYBOARD};
+        final int[] use = {0, 1}; // IsXPointer, IsXKeyboard
+
+        int data = names.length * 8;
+        for (String name : names) data += 1 + name.length();
+        int total = (32 + data + 1 + 3) & ~3;
+        int extra = total - 32;
+
+        try (XStreamLock lock = outputStream.lock()) {
+            outputStream.writeByte(RESPONSE_CODE_SUCCESS);
+            outputStream.writeByte((byte)2); // reply type: ListInputDevices
+            outputStream.writeShort(client.getSequenceNumber());
+            outputStream.writeInt(extra / 4);
+            outputStream.writeByte((byte)names.length);
+            outputStream.writePad(23);
+            for (int i = 0; i < names.length; i++) {
+                outputStream.writeInt(0); // device type atom: none
+                outputStream.writeByte((byte)ids[i]);
+                outputStream.writeByte((byte)0); // no classes
+                outputStream.writeByte((byte)use[i]);
+                outputStream.writeByte((byte)0);
+            }
+            int written = names.length * 8;
+            for (String name : names) {
+                outputStream.writeByte((byte)name.length());
+                for (int k = 0; k < name.length(); k++) outputStream.writeByte((byte)name.charAt(k));
+                written += 1 + name.length();
+            }
+            outputStream.writePad(extra - written);
+        }
     }
 
     private void queryDevice(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException {

@@ -11,7 +11,7 @@ not yet. Each stop below was found by running the game on the device; the last o
 | 1 | `free(): invalid size`, SIGABRT after 1 s, backtrace `box64/free` <- `libdxcompiler.so+1959281` | 0.39 ships mimalloc (`libmimalloc.so.3`, the exe calls `mi_zalloc`, `mi_heap_new`, ...) and on Linux it takes over `malloc`/`free` for the whole process. Box64 cannot interpose the wrapped glibc, so a block mimalloc allocated reaches glibc's `free`. `BOX64_MALLOC_HACK` 0, 1, 2 only change where it dies | **Fixed.** `tools/linux-shim/mimalloc_compat.c` (`libmimalloc_compat_x64.so`): the `mi_*` functions the game imports, built on plain `malloc`, no `malloc`/`free` of its own. It must be preloaded: `BOX64_LD_PRELOAD=...:libmimalloc.so.3` (the file named like the library's soname). `BOX64_LD_LIBRARY_PATH` is not enough, the game's own copy is found first. **Not wired into the app yet** (tried by hand through `Winlator/linux-env.txt`) |
 | 2 | SIGSEGV in `box64/vkGetInstanceProcAddr`, just after `no wrapper for vkCmdDispatchTileQCOM` | Box64's `resolveSymbol` (`src/wrapped/wrappedvulkan.c`) dereferences the missing wrapper when the driver returns a function Box64 has no wrapper for. Turnip 26.x (and the runtime's own) lists `VK_QCOM_tile_shading`, and the game asks for every function | **Fixed** by `scripts/linux/box64/patches/0002-vulkan-function-without-wrapper.patch` (components repo, not committed): return NULL when there is no wrapper. Tried with a Box64 built on the Mac (zig cc, see below) and put over the installed binary. A release of the patched build is needed |
 | 3 | SIGILL (`ud2`) at `libcef.so+0x8770d6b`, 10 s after start | CEF's `base::i18n::InitializeICU` cannot open `icudtl.dat`: it looks in the **game root** (`.../BeamNG_0_39/icudtl.dat`), the depot has it only in `BinLinux/`. Found with an `open()` tracer (`LD_PRELOAD`). `/proc/self/exe` is fine (a test program showed Box64 returns the game's path) | **Worked around** by copying `icudtl.dat`, `resources.pak`, `chrome_100_percent.pak`, `chrome_200_percent.pak`, `snapshot_blob.bin`, `v8_context_snapshot.bin` from `BinLinux/` into the game root (28 MB). The app should do this without touching the user's folder, for example an `open()` fallback in `libskyshim_x64.so` for these names |
-| 4 | SIGILL (`ud2`) at `libcef.so+0x39043bf`, about 1 s after `GELUA VM loaded` | **Open.** A check in CEF fails (a size mismatch while reading a serialized list of strings). It is not the dynarec: the same crash with the Stability preset and with `BOX64_DYNAREC=0` (SIGABRT at the same address, 3 minutes in). The caller is the game's startup function (after `TScmdline`), a virtual call on a CEF object. The game starts the CEF zygote (`--type=zygote --no-zygote-sandbox ...`) before it | Not found |
+| 4 | SIGILL (`ud2`) at `libcef.so+0x39043bf`, about 1 s after `GELUA VM loaded` | Our X server's reply to XI 1.x `ListInputDevices` with no devices was 32 bytes with `length=0`; Chromium's reader (`x11::Input::ListInputDevices`) aligns the end of the names list one byte past an empty list and aborts when the length does not cover it. Same crash in Steam's web helper (aarch64 `brk`), see [linux-cef-x11.md](linux-cef-x11.md) | **Fixed** in `XInput2Extension.listInputDevices`: the reply lists the two master devices, which both Chromium and libXi accept |
 
 ## How it was investigated (for the next person)
 
@@ -45,7 +45,15 @@ Container "Linux Box64", Performance preset, Turnip `turnip-v26.3.0-20261011-a8x
 off changed nothing), Box64 0.4.4 with patches 0001 (programs from shared storage) and 0002 (Vulkan), game started from
 shared storage with Box64 (no copy needed, unlike FEX).
 
-## What was left on the phone (to clean up or reuse)
+## Result (2026-10-12, later)
+
+With the four fixes BeamNG 0.39 reaches its main menu (about 115 FPS, Alpha v.0.39.4) on Box64 from shared storage. The app does
+items 1 and 3 by itself now (`LinuxSession.guestEnv`: the mimalloc stub is preloaded for a program whose folder has
+`libmimalloc.so.3`; `SKY_RESOURCE_DIR` makes `libskyshim_x64.so` open `icudtl.dat` and the `.pak`/`.bin` files from the
+program's folder when the game root lacks them). Item 4 is the X server. Item 2 still needs the patched Box64 (here a
+debug build copies it over the installed one; users need a published build).
+
+## What was left on the phone (written before the fix; the debug leftovers were removed afterwards) (to clean up or reuse)
 
 * In the game folder `Download/Games/BeamNG_0_39/`: copies of `icudtl.dat`, `resources.pak`, `chrome_100_percent.pak`,
   `chrome_200_percent.pak`, `snapshot_blob.bin` (28 MB in all; `v8_context_snapshot.bin` was copied too). Needed for #3;
@@ -69,7 +77,5 @@ shared storage with Box64 (no copy needed, unlike FEX).
 
 ## Decisions that were open
 
-1. Keep looking for the fourth stop (CEF `ud2` at `libcef.so+0x39043bf`), or stop at 0.34.
-2. Make the three fixes permanent: the app preloads the mimalloc stub for any game that ships `libmimalloc.so.3`
-   (detected from the program's folder); `libskyshim_x64.so` retries `open()` of CEF's resource files in the program's
-   folder when the game root lacks them; a published Box64 build with patch 0002.
+1. Publish a Box64 build with patch 0002 (a public release in the components repo; the registry entry in `linux.json`);
+   until then 0.39 works only in a debug build with `Winlator/box64-override`.

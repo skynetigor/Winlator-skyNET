@@ -158,6 +158,9 @@ public final class LinuxSession {
                         // The runtime ships gawk (what awk links to) without the execute bit, and the installer needs awk.
                         + "chmod 755 /usr/bin/gawk; "
                         + "bannerlator-steam-install || exit 1; "
+                        // The client's own logs are in the container's private home: keep a copy on shared storage.
+                        + "( while sleep 10; do mkdir -p /storage/emulated/0/Winlator/logs/steam-logs; "
+                        + "cp -r \"$steam_root/logs/.\" /storage/emulated/0/Winlator/logs/steam-logs/ 2>/dev/null; done ) & "
                         + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; "
                         + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
                         + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
@@ -253,7 +256,22 @@ public final class LinuxSession {
         }
         bind(argv, inputDir.getPath(), "/dev/input");
         bindIfExists(argv, new File(rt, EMPTY_DIR), "/sys/fs/selinux");
-        for (String name : FAKE_PROC_FILES) {
+        // Chromium (the Steam client's web helper, a game's CEF) reads the inotify limits and logs an error that it does not
+        // survive for long when they are missing; Android hides /proc/sys/fs from an app.
+        String[][] inotify = {
+                {"sys/fs/inotify/max_user_watches", "65536\n"},
+                {"sys/fs/inotify/max_user_instances", "1024\n"},
+                {"sys/fs/inotify/max_queued_events", "16384\n"}};
+        java.util.List<String> fakeNames = new ArrayList<>(java.util.Arrays.asList(FAKE_PROC_FILES));
+        for (String[] entry : inotify) {
+            File fake = new File(rt, FAKE_PROC_DIR + "/" + entry[0]);
+            if (!fake.exists()) {
+                fake.getParentFile().mkdirs();
+                FileUtils.writeString(fake, entry[1]);
+            }
+            fakeNames.add(entry[0]);
+        }
+        for (String name : fakeNames) {
             File fake = new File(rt, FAKE_PROC_DIR + "/" + name);
             if (fake.exists() && !new File("/proc/" + name).canRead()) bind(argv, fake.getPath(), "/proc/" + name);
         }
@@ -269,7 +287,9 @@ public final class LinuxSession {
 
         argv.add("/usr/bin/env");
         argv.add("-i");
-        argv.addAll(guestEnv(context, rt, imageFsRoot, container));
+        String programGuestPath = programGuestPath(guestCommand);
+        argv.addAll(guestEnv(context, rt, imageFsRoot, container,
+                programGuestPath == null ? null : hostFile(context, container, programGuestPath), programGuestPath));
         for (String part : guestCommand) argv.add(part);
 
         EnvVars host = new EnvVars();
@@ -281,7 +301,16 @@ public final class LinuxSession {
         return new Launch(argv.toArray(new String[0]), host.toStringArray(), rt);
     }
 
-    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container) {
+    /** The program a session starts, as the guest sees its path (the argument after "bannerlator-run"); null if none. */
+    private static String programGuestPath(String[] guestCommand) {
+        for (int i = 0; i + 1 < guestCommand.length; i++) {
+            if ("bannerlator-run".equals(guestCommand[i])) return guestCommand[i + 1];
+        }
+        return null;
+    }
+
+    private static List<String> guestEnv(Context context, File rt, File imageFsRoot, Container container, File program, String programGuestPath) {
+        File programFolder = program != null ? program.getParentFile() : null;
         Map<String, String> env = new LinkedHashMap<>();
         env.put("HOME", "/root");
         env.put("USER", "root");
@@ -356,7 +385,24 @@ public final class LinuxSession {
                 if (preload.length() > 0) preload.append(':');
                 preload.append(shim.getPath());
             }
+            // A game that ships mimalloc (BeamNG 0.39) has it take over malloc and free for the whole process, which Box64
+            // cannot follow: a block mimalloc allocated reaches glibc's free and the game dies a second after it starts.
+            // A library with its mi_* functions on plain malloc, preloaded under the soname the game asks for, takes the
+            // place of the game's own (tools/linux-shim/mimalloc_compat.c).
+            if (programFolder != null && new File(programFolder, "libmimalloc.so.3").isFile()) {
+                File stub = stageAsset(context, "libmimalloc.so.3");
+                if (stub != null) {
+                    if (preload.length() > 0) preload.append(':');
+                    preload.append(stub.getPath());
+                }
+            }
             if (preload.length() > 0) env.put("BOX64_LD_PRELOAD", preload.toString());
+            // A game with an embedded Chromium looks for icudtl.dat and the .pak files in its game folder, one level above
+            // the program's, where its depot has none: the shim opens them from the program's folder when that fails.
+            if (programFolder != null && new File(programFolder, "libcef.so").isFile()
+                    && !new File(programFolder.getParentFile(), "icudtl.dat").exists()) {
+                env.put("SKY_RESOURCE_DIR", programGuestPath.substring(0, programGuestPath.lastIndexOf('/')));
+            }
             env.put("BOX64_DYNAREC", "1");
             // The Box64 log switch in Settings (on by default in a debug build) reaches Linux sessions too.
             if (androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)

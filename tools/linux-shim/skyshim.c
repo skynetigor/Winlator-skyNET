@@ -104,6 +104,27 @@ static int pad_path(const char *path, char *out, size_t size) {
     return atoi(digits);
 }
 
+/*
+ * A game with an embedded Chromium (CEF) reads icudtl.dat and its .pak files from the game's folder, one level above the
+ * program's; BeamNG's depot has them only next to the program. When SKY_RESOURCE_DIR names the program's folder, an open
+ * of one of these files that fails is tried there.
+ */
+static int resource_fallback(const char *path, int flags, mode_t mode, int (*real)(const char *, int, ...)) {
+    static const char *const names[] = {"icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak",
+                                        "snapshot_blob.bin", "v8_context_snapshot.bin", NULL};
+    const char *dir = getenv("SKY_RESOURCE_DIR");
+    if (!dir || !*dir || !path) return -1;
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    for (int i = 0; names[i]; i++) {
+        if (strcmp(base, names[i]) != 0) continue;
+        char alt[512];
+        snprintf(alt, sizeof alt, "%s/%s", dir, base);
+        return real(alt, flags, mode);
+    }
+    return -1;
+}
+
 int open(const char *path, int flags, ...) {
     static int (*real)(const char *, int, ...);
     if (!real) real = dlsym(RTLD_NEXT, "open");
@@ -123,7 +144,14 @@ int open(const char *path, int flags, ...) {
         }
         return fd;
     }
-    return real(path, flags, mode);
+    int fd = real(path, flags, mode);
+    if (fd < 0 && errno == ENOENT) {
+        int saved = errno;
+        int alt = resource_fallback(path, flags, mode, real);
+        if (alt >= 0) return alt;
+        errno = saved;
+    }
+    return fd;
 }
 
 int open64(const char *path, int flags, ...) {
