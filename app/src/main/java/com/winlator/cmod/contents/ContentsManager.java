@@ -24,7 +24,10 @@ import java.util.Map;
 
 public class ContentsManager {
     public static final String PROFILE_NAME = "profile.json";
-    public static final String REMOTE_PROFILES = "https://raw.githubusercontent.com/skynetigor/winlator-skynet-components/main/contents.json";
+    /** The registry repository's raw files: main in a release build, the branch the debug build was made on in a debug one. */
+    public static final String COMPONENTS_BASE =
+            "https://raw.githubusercontent.com/skynetigor/winlator-skynet-components/" + com.winlator.cmod.BuildConfig.COMPONENTS_BRANCH + "/";
+    public static final String REMOTE_PROFILES = COMPONENTS_BASE + "contents.json";
     private static final String LEGACY_REMOTE_PROFILES = "https://raw.githubusercontent.com/StevenMXZ/Winlator-Contents/main/contents.json";
 
     /** Drops a saved URL that still points at the old third-party registry so the app falls back to {@link #REMOTE_PROFILES}. */

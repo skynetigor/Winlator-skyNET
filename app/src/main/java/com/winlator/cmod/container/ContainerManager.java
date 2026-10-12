@@ -141,6 +141,11 @@ public class ContainerManager {
         });
     }
 
+    /** Synchronous: for callers that are already off the main thread (the importer). */
+    public Container createLinuxContainerFromData(JSONObject data) {
+        return createLinuxContainer(data);
+    }
+
     private Container createLinuxContainer(JSONObject data) {
         try {
             int id = findNextContainerId();

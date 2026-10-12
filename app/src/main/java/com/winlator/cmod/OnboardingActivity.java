@@ -115,6 +115,8 @@ public class OnboardingActivity extends AppCompatActivity {
     private boolean finishing;
     /** Set when the user skipped the Wine/Proton install and first container; finishing then creates neither. */
     private boolean skipSetup;
+    /** How the first container is to be made when it is not by the Windows pages: "linux", "game" or "import". */
+    private String pendingStart;
     private String selectedInitialWine;
     private String pendingInstallType;
     private String pendingInstallVersion;
@@ -208,6 +210,21 @@ public class OnboardingActivity extends AppCompatActivity {
                     @Override
                     public void onSkipSetup() {
                         skipSetup = true;
+                    }
+
+                    @Override
+                    public void onChooseStart(@NonNull String start) {
+                        pendingStart = start.isEmpty() ? null : start;
+                    }
+
+                    @Override
+                    public void onOpenSettings() {
+                        skipSetup = true;
+                        pendingStart = null;
+                        if (!finishing) {
+                            finishing = true;
+                            enterMainApp(R.id.main_menu_settings);
+                        }
                     }
 
                     @Override
@@ -1484,11 +1501,24 @@ public class OnboardingActivity extends AppCompatActivity {
     }
 
     private void enterMainApp() {
+        enterMainApp(0);
+    }
+
+    /** @param menuItemId the page of the app to open (0 for the default one) */
+    private void enterMainApp(int menuItemId) {
         preferences.edit()
                 .putBoolean(PREF_ONBOARDING_COMPLETE, true)
                 .putString(PREF_INITIAL_WINE, selectedInitialWine == null ? "" : selectedInitialWine)
                 .apply();
-        startActivity(new Intent(this, MainActivity.class));
+        Intent main = new Intent(this, MainActivity.class);
+        if (menuItemId > 0) main.putExtra("selected_menu_item_id", menuItemId);
+        startActivity(main);
+        // The way of making the first container chosen on the start screen opens on top of the app.
+        if (pendingStart != null) {
+            Intent create = new Intent(this, com.winlator.cmod.ui.settings.ContainersSettingsActivity.class);
+            create.putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_START, pendingStart);
+            startActivity(create);
+        }
         overridePendingTransition(0, 0);
         finish();
     }

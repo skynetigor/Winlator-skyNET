@@ -87,6 +87,7 @@ import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
 import com.winlator.cmod.ui.container.GameContainerFragment
+import com.winlator.cmod.ui.container.NewContainerFragment
 import com.winlator.cmod.ui.container.LinuxContainerCreateFragment
 import com.winlator.cmod.ui.container.LinuxProgramsFragment
 import com.winlator.cmod.ui.theme.WinZTheme
@@ -126,7 +127,26 @@ class ContainersSettingsActivity : AppCompatActivity() {
             }
         }
 
-        if (savedInstanceState == null) showHome()
+        if (savedInstanceState == null) {
+            showHome()
+            // Started from the first-run screen with a way of making a container already chosen.
+            intent.getStringExtra(EXTRA_START)?.let { startContainer(it) }
+        }
+    }
+
+    /** Opens the screen for one way of making a container: "windows", "linux", "game" or "import". */
+    fun startContainer(kind: String) {
+        when (kind) {
+            "windows" -> openFragment(ContainerCreateComposeFragment())
+            "linux" -> openFragment(LinuxContainerCreateFragment())
+            "game" -> openFragment(GameContainerFragment())
+            "import" -> importContainer()
+        }
+    }
+
+    companion object {
+        /** "linux", "game" or "import": the screen to open straight away. */
+        const val EXTRA_START = "start"
     }
 
     override fun onResume() {
@@ -145,8 +165,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
                         containers = containersState.value,
                         propertiesContainer = propertiesState.value,
                         onBack = { finish() },
-                        onAdd = { openFragment(ContainerCreateComposeFragment()) },
-                        onAddLinux = { openFragment(LinuxContainerCreateFragment()) },
+                        onAdd = { openFragment(NewContainerFragment()) },
                         onEdit = { id -> editContainer(id) },
                         onProperties = { id ->
                             propertiesState.value = ContainerManager(this@ContainersSettingsActivity).getContainerById(id)
@@ -155,9 +174,7 @@ class ContainersSettingsActivity : AppCompatActivity() {
                         onRun = ::runContainer,
                         onDuplicate = ::duplicateContainer,
                         onRemove = ::removeContainer,
-                        onExport = ::exportContainer,
-                        onImport = ::importContainer,
-                        onDownload = { openFragment(GameContainerFragment()) }
+                        onExport = ::exportContainer
                     )
                 }
             }
@@ -269,14 +286,109 @@ class ContainersSettingsActivity : AppCompatActivity() {
 
     /** Runs the container import for an already-parsed profile (from a file or from the game list). */
     internal fun importEnvelope(envelope: ContainerProfile.Envelope) {
+        if (envelope.container.optString("type") != Container.TYPE_LINUX) {
+            runImport(envelope, null)
+            return
+        }
+        // A Linux container needs its runtime, driver and emulator: the user sees what is missing and confirms the download.
         val preloader = PreloaderDialog(this)
         preloader.showOnUiThread(com.winlator.cmod.R.string.loading)
+        Thread {
+            val plan = ContainerImporter.planLinux(this, envelope.container)
+            runOnUiThread {
+                preloader.closeOnUiThread()
+                if (plan.install.isEmpty()) {
+                    runImport(envelope, plan)
+                    return@runOnUiThread
+                }
+                val total = plan.install.sumOf { it.size }
+                val lines = plan.install.joinToString("\n") { "• ${it.name}" + if (it.size > 0) " (${formatDownloadSize(it.size)})" else "" }
+                val message = StringBuilder("The following components will be installed:\n\n").append(lines)
+                if (total > 0) message.append("\n\nTotal download: ").append(formatDownloadSize(total))
+                if (plan.unavailable.isNotEmpty())
+                    message.append("\n\nNot in the catalog, so not installed:\n")
+                        .append(plan.unavailable.joinToString("\n") { "• $it" })
+                AppCompatAlertDialog.Builder(this)
+                    .setTitle("Install components")
+                    .setMessage(message.toString())
+                    .setPositiveButton("Download and install") { _, _ -> runImport(envelope, plan) }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setCancelable(false)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun formatDownloadSize(bytes: Long): String =
+        if (bytes >= (1L shl 30)) String.format(java.util.Locale.US, "%.1f GB", bytes / (1L shl 30).toDouble())
+        else String.format(java.util.Locale.US, "%d MB", bytes shr 20)
+
+    /** One line of the install dialog: a component's name, its progress bar and what it is doing. */
+    private class ComponentRow(val bar: android.widget.ProgressBar, val state: android.widget.TextView)
+
+    /** A dialog with a progress bar for each component about to be installed; null when there is nothing to install. */
+    private fun showInstallDialog(plan: ContainerImporter.LinuxPlan?): Pair<AppCompatAlertDialog, Map<String, ComponentRow>>? {
+        if (plan == null || plan.install.isEmpty()) return null
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val list = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(dp(24), dp(12), dp(24), dp(4))
+        }
+        val rows = LinkedHashMap<String, ComponentRow>()
+        for (entry in plan.install) {
+            val name = android.widget.TextView(this).apply {
+                text = entry.name + if (entry.size > 0) " (${formatDownloadSize(entry.size)})" else ""
+                textSize = 15f
+            }
+            val bar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 100
+                progress = 0
+            }
+            val state = android.widget.TextView(this).apply {
+                text = "Waiting"
+                textSize = 12f
+                alpha = 0.7f
+            }
+            list.addView(name)
+            list.addView(bar, android.widget.LinearLayout.LayoutParams(android.widget.LinearLayout.LayoutParams.MATCH_PARENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT))
+            list.addView(state)
+            (state.layoutParams as android.widget.LinearLayout.LayoutParams).bottomMargin = dp(14)
+            rows[entry.id] = ComponentRow(bar, state)
+        }
+        val dialog = AppCompatAlertDialog.Builder(this)
+            .setTitle("Installing components")
+            .setView(list)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        return dialog to rows
+    }
+
+    private fun runImport(envelope: ContainerProfile.Envelope, plan: ContainerImporter.LinuxPlan?) {
+        val install = showInstallDialog(plan)
+        val preloader = PreloaderDialog(this)
+        if (install == null) preloader.showOnUiThread(com.winlator.cmod.R.string.loading)
         Thread {
             val manager = ContainerManager(this)
             val contents = ContentsManager(this)
             contents.syncContents()
-            val result = ContainerImporter.run(this, manager, contents, envelope) { /* progress: kept in the spinner */ }
+            val progress = object : ContainerImporter.Progress {
+                override fun status(message: String) {
+                    if (install == null) preloader.setStatusText(message)
+                }
+
+                override fun component(id: String, state: String, percent: Int) {
+                    val row = install?.second?.get(id) ?: return
+                    runOnUiThread {
+                        if (percent >= 0) row.bar.progress = percent
+                        row.state.text = if (percent in 0..99 && state != "Starting") "$state $percent%" else state
+                    }
+                }
+            }
+            val result = ContainerImporter.run(this, manager, contents, envelope, progress, plan)
             runOnUiThread {
+                install?.first?.dismiss()
                 preloader.closeOnUiThread()
                 // Leave the game list (if that is where the import started) before reporting.
                 if (supportFragmentManager.backStackEntryCount > 0) supportFragmentManager.popBackStack()
@@ -318,16 +430,13 @@ private fun ContainersSettingsScreen(
     propertiesContainer: Container?,
     onBack: () -> Unit,
     onAdd: () -> Unit,
-    onAddLinux: () -> Unit,
     onEdit: (Int) -> Unit,
     onProperties: (Int) -> Unit,
     onDismissProperties: () -> Unit,
     onRun: (Int) -> Unit,
     onDuplicate: (Int) -> Unit,
     onRemove: (Int) -> Unit,
-    onExport: (Int) -> Unit,
-    onImport: () -> Unit,
-    onDownload: () -> Unit
+    onExport: (Int) -> Unit
 ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -338,46 +447,7 @@ private fun ContainersSettingsScreen(
             )
         },
         floatingActionButton = {
-            var menuExpanded by remember { mutableStateOf(false) }
-            Box {
-                FloatingActionButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Outlined.Add, "Add container")
-                }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("New container") },
-                        leadingIcon = { Icon(Icons.Outlined.Add, null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAdd()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Linux container") },
-                        leadingIcon = { Icon(Icons.Outlined.Terminal, null) },
-                        onClick = {
-                            menuExpanded = false
-                            onAddLinux()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Import container") },
-                        leadingIcon = { Icon(Icons.Outlined.Download, null) },
-                        onClick = {
-                            menuExpanded = false
-                            onImport()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("For a game") },
-                        leadingIcon = { Icon(Icons.Outlined.Language, null) },
-                        onClick = {
-                            menuExpanded = false
-                            onDownload()
-                        }
-                    )
-                }
-            }
+            FloatingActionButton(onClick = onAdd) { Icon(Icons.Outlined.Add, "Add container") }
         }
     ) { padding ->
         if (containers.isEmpty()) {

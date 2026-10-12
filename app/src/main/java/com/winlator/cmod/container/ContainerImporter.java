@@ -35,6 +35,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class ContainerImporter {
     public interface Progress {
         void status(String message);
+
+        /**
+         * Where one component of a Linux import stands: the {@code id} of its catalog entry, a short {@code state}
+         * ("Downloading", "Verifying", "Unpacking", "Installed", or the reason it failed) and the percent of that step
+         * (-1 when it has none).
+         */
+        default void component(String id, String state, int percent) {}
     }
 
     public static final class Result {
@@ -54,6 +61,72 @@ public final class ContainerImporter {
 
     public static Result run(Context context, ContainerManager manager, ContentsManager contents,
                              ContainerProfile.Envelope envelope, Progress progress) {
+        return run(context, manager, contents, envelope, progress, null);
+    }
+
+    /** What importing a Linux container has to download first, and what the catalogs do not have. */
+    public static final class LinuxPlan {
+        public final List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> install = new ArrayList<>();
+        public final List<String> unavailable = new ArrayList<>();
+    }
+
+    /**
+     * The runtime, Turnip driver and x86 emulator a Linux container names that are not installed here, looked up in the
+     * catalogs. Blocking (reads them from the network); call off the main thread. Nothing is installed.
+     */
+    public static LinuxPlan planLinux(Context context, JSONObject data) {
+        LinuxPlan plan = new LinuxPlan();
+        JSONObject extra = data.optJSONObject("extraData");
+        if (extra == null) extra = new JSONObject();
+
+        String runtime = data.optString("linuxRuntime", "");
+        if (runtime.isEmpty() || !com.winlator.cmod.linux.LinuxRuntime.isInstalled(context, runtime)) {
+            // Any installed runtime will do in place of one the catalog does not have; with none, the catalog's first.
+            List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> catalog = com.winlator.cmod.linux.LinuxRuntimeCatalog.fetch();
+            com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry found = null;
+            if (catalog != null) {
+                for (com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry e : catalog) if (e.id.equals(runtime)) found = e;
+                if (found == null && !catalog.isEmpty() && com.winlator.cmod.linux.LinuxRuntime.listInstalled(context).isEmpty())
+                    found = catalog.get(0);
+            }
+            if (found != null) plan.install.add(found);
+            else if (com.winlator.cmod.linux.LinuxRuntime.listInstalled(context).isEmpty())
+                plan.unavailable.add("Linux runtime" + (runtime.isEmpty() ? "" : " " + runtime));
+        }
+
+        String driver = extra.optString(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");
+        if (!driver.isEmpty() && !com.winlator.cmod.linux.LinuxDriverManager.isInstalled(context, driver)) {
+            com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry found = null;
+            List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> catalog = com.winlator.cmod.linux.LinuxRuntimeCatalog.fetchDrivers();
+            if (catalog != null) for (com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry e : catalog) if (e.id.equals(driver)) found = e;
+            if (found != null) plan.install.add(found);
+            else plan.unavailable.add("Turnip driver " + driver);
+        }
+
+        String emulatorId = extra.optString(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ID, "");
+        if (!emulatorId.isEmpty() && com.winlator.cmod.linux.LinuxEmulator.find(context, emulatorId) == null) {
+            com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry found = null;
+            List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> catalog = com.winlator.cmod.linux.LinuxRuntimeCatalog.fetchEmulators();
+            if (catalog != null) for (com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry e : catalog) if (e.id.equals(emulatorId)) found = e;
+            if (found != null) plan.install.add(found);
+            else plan.unavailable.add("x86 emulator " + emulatorId);
+        }
+
+        // FEX runs programs in an x86-64 root filesystem of its own.
+        String rootfsId = extra.optString(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ROOTFS, "");
+        if (!rootfsId.isEmpty() && !com.winlator.cmod.linux.LinuxRootfs.isInstalled(context, rootfsId)) {
+            com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry found = null;
+            List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> catalog = com.winlator.cmod.linux.LinuxRuntimeCatalog.fetchRootfs();
+            if (catalog != null) for (com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry e : catalog) if (e.id.equals(rootfsId)) found = e;
+            if (found != null) plan.install.add(found);
+            else plan.unavailable.add("x86-64 root filesystem " + rootfsId);
+        }
+        return plan;
+    }
+
+    /** @param linuxPlan for a Linux container: what {@link #planLinux} found, installed before the container is created */
+    public static Result run(Context context, ContainerManager manager, ContentsManager contents,
+                             ContainerProfile.Envelope envelope, Progress progress, LinuxPlan linuxPlan) {
         List<String> warnings = new ArrayList<>();
         JSONObject data = envelope.container;
         JSONArray hints = envelope.components;
@@ -68,6 +141,10 @@ public final class ContainerImporter {
         } catch (Exception e) {
             warnings.add("Couldn't refresh the components catalog (offline?); using what's installed or bundled.");
         }
+
+        // A Linux container has no Wine prefix and none of the components below.
+        if (Container.TYPE_LINUX.equals(data.optString("type")))
+            return importLinux(context, manager, data, warnings, progress, linuxPlan);
 
         // Wine/Proton is critical: it must exist before the prefix is built.
         String wineVersion = data.optString("wineVersion", "");
@@ -460,6 +537,91 @@ public final class ContainerImporter {
             return in != null;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    /**
+     * A Linux container is its settings only. The runtime, Turnip driver and x86 emulator it names are not downloaded
+     * here (the runtime is about 800 MB): what is missing is reported, and the container opens in the editor with
+     * whatever is installed picked in its place.
+     */
+    private static Result importLinux(Context context, ContainerManager manager, JSONObject data,
+                                      List<String> warnings, Progress progress, LinuxPlan plan) {
+        try {
+            // What the user confirmed to be downloaded, small packages first.
+            if (plan != null) {
+                List<com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry> order = new ArrayList<>(plan.install);
+                order.sort((a, b) -> Long.compare(a.size, b.size));
+                for (com.winlator.cmod.linux.LinuxRuntimeCatalog.Entry entry : order) {
+                    final int[] last = {-1};
+                    report(progress, "Installing " + entry.name + "…");
+                    if (progress != null) progress.component(entry.id, "Starting", 0);
+                    String error = com.winlator.cmod.linux.LinuxRuntimeInstaller.install(context, entry, (phase, percent) -> {
+                        if (percent == last[0]) return;
+                        last[0] = percent;
+                        String what = phase == com.winlator.cmod.linux.LinuxRuntimeInstaller.Phase.DOWNLOAD ? "Downloading"
+                                : phase == com.winlator.cmod.linux.LinuxRuntimeInstaller.Phase.VERIFY ? "Verifying" : "Unpacking";
+                        report(progress, what + " " + entry.name + " " + percent + "%");
+                        if (progress != null) progress.component(entry.id, what, percent);
+                    });
+                    if (error != null) warnings.add("Could not install " + entry.name + ": " + error);
+                    if (progress != null) progress.component(entry.id, error == null ? "Installed" : "Failed: " + error, error == null ? 100 : -1);
+                }
+            }
+            // A runtime the profile names but the catalog lacks: any installed one will do.
+            String named = data.optString("linuxRuntime", "");
+            if (named.isEmpty() || !com.winlator.cmod.linux.LinuxRuntime.isInstalled(context, named)) {
+                List<com.winlator.cmod.linux.LinuxRuntime.Installed> have = com.winlator.cmod.linux.LinuxRuntime.listInstalled(context);
+                if (!have.isEmpty()) data.put("linuxRuntime", have.get(0).id);
+            }
+
+            String runtime = data.optString("linuxRuntime", "");
+            if (runtime.isEmpty() || !com.winlator.cmod.linux.LinuxRuntime.isInstalled(context, runtime))
+                warnings.add("The Linux runtime" + (runtime.isEmpty() ? "" : " '" + runtime + "'")
+                        + " is not installed. Download it in Components; the container cannot start until then.");
+
+            JSONObject extra = data.optJSONObject("extraData");
+            if (extra == null) extra = new JSONObject();
+            data.put("extraData", extra);
+
+            String driver = extra.optString(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");
+            if (!driver.isEmpty() && !com.winlator.cmod.linux.LinuxDriverManager.isInstalled(context, driver)) {
+                extra.put(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");
+                warnings.add("Turnip driver '" + driver + "' is not installed; the runtime's own is used. Install it in "
+                        + "Components > Linux Driver and pick it in the container's Graphics settings.");
+            }
+
+            String emulator = extra.optString(com.winlator.cmod.linux.LinuxEmulator.EXTRA_EMULATOR, "");
+            String emulatorId = extra.optString(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ID, "");
+            if (!emulatorId.isEmpty() && com.winlator.cmod.linux.LinuxEmulator.find(context, emulatorId) == null) {
+                extra.put(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ID, "");
+                warnings.add("The " + emulator + " build '" + emulatorId + "' is not installed; the first installed one is used. "
+                        + "Install it in Components > Linux Emulator.");
+            }
+
+            String rootfsId = extra.optString(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ROOTFS, "");
+            if (!rootfsId.isEmpty() && !com.winlator.cmod.linux.LinuxRootfs.isInstalled(context, rootfsId)) {
+                extra.put(com.winlator.cmod.linux.LinuxEmulator.EXTRA_ROOTFS, "");
+                warnings.add("The x86-64 root filesystem '" + rootfsId + "' is not installed; the first installed one is used. "
+                        + "Install it in Components > Linux Root Filesystem; FEX cannot start without one.");
+            }
+
+            if (extra.optString(com.winlator.cmod.lsfg.LsfgManager.EXTRA_MULTIPLIER, "").length() > 0
+                    && !com.winlator.cmod.lsfg.LsfgManager.hasDll(context))
+                warnings.add("Frame generation settings were imported; import your Lossless.dll in Settings > Components > Frame Generation to enable it.");
+
+            report(progress, "Creating container…");
+            Container created = manager.createLinuxContainerFromData(data);
+            if (created == null) {
+                warnings.add("Container creation failed.");
+                return new Result(null, warnings);
+            }
+            ContainerManager.syncSteamShortcut(created, "1".equals(created.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM)));
+            return new Result(created, warnings);
+        } catch (Exception e) {
+            Log.e(TAG, "Linux container import failed", e);
+            warnings.add("Container creation failed: " + e.getMessage());
+            return new Result(null, warnings);
         }
     }
 

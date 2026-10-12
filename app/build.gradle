@@ -88,6 +88,24 @@ tasks.register("prepareKotlinBuildScriptModel"){}
 downloadProton.dependsOn(downloadImageFS)
 preBuild.dependsOn(downloadProton)
 
+// The debug build reads its registry (contents.json, linux.json) from the branch of winlator-skynet-components that is
+// named like the branch this checkout is on, when that repository has one; otherwise from main. A release build always
+// reads main.
+def currentBranch = providers.exec {
+    commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
+    workingDir = rootDir
+    ignoreExitValue = true
+}.standardOutput.asText.map { it.trim() }
+def debugComponentsBranch = providers.provider {
+    String branch = currentBranch.get()
+    if (branch.isEmpty() || branch == 'HEAD') return 'main'
+    String listed = providers.exec {
+        commandLine 'git', 'ls-remote', '--heads', 'https://github.com/skynetigor/winlator-skynet-components.git', branch
+        ignoreExitValue = true
+    }.standardOutput.asText.get()
+    return listed.trim().isEmpty() ? 'main' : branch
+}
+
 android {
     namespace 'com.winlator.cmod'
     // Keep compileSdk from your current config. If you want to match Termux-X11, you could set to 34.
@@ -141,11 +159,13 @@ android {
     // Keep Winlator’s buildTypes
     buildTypes {
         debug {
+            buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
             minifyEnabled false
             // A separate app next to the release build: its own package, so no data or signature is shared.
             manifestPlaceholders = [appLabel: "skyNET Debug"]
         }
         release {
+            buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'
             minifyEnabled false
             signingConfig signingConfigs.debug
             crunchPngs false
@@ -171,6 +191,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         prefab = true
         compose = true
     }

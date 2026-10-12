@@ -32,9 +32,16 @@ public final class ContainerCatalog {
         public final String channel;
         /** Direct link to the .wcfg profile. */
         public final String url;
+        /** Full names of the processors the config is known to work on, e.g. "Snapdragon 8 Elite Gen 5". May be empty. */
+        public final List<String> compatibility;
+        /** Full names of the devices it was tested on, e.g. "Samsung Galaxy Z Fold8 Ultra". May be empty. */
+        public final List<String> testedOn;
 
         Entry(String id, String name, String gameId, String gameName, String gameVersion,
-              String description, List<String> tags, String url, String channel) {
+              String description, List<String> tags, String url, String channel,
+              List<String> compatibility, List<String> testedOn) {
+            this.compatibility = compatibility;
+            this.testedOn = testedOn;
             this.id = id;
             this.name = name;
             this.gameId = gameId;
@@ -45,6 +52,32 @@ public final class ContainerCatalog {
             this.url = url;
             this.channel = channel;
         }
+    }
+
+    /** A registry field that holds one name or a list of names. */
+    private static List<String> strings(Object value) {
+        ArrayList<String> out = new ArrayList<>();
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            for (int i = 0; i < array.length(); i++) {
+                String item = array.optString(i, "").trim();
+                if (!item.isEmpty()) out.add(item);
+            }
+        } else if (value instanceof String && !((String) value).trim().isEmpty()) {
+            out.add(((String) value).trim());
+        }
+        return out;
+    }
+
+    /**
+     * A processor's short name: "Snapdragon 8 Elite Gen 5" is "s8eg5", "Snapdragon 8 Gen 3" "s8g3". A name that is not a
+     * Snapdragon's is returned as it is.
+     */
+    public static String shortProcessorName(String full) {
+        String lower = full.trim().toLowerCase(java.util.Locale.ROOT).replace("qualcomm", "");
+        if (!lower.contains("snapdragon")) return full.trim();
+        String compact = lower.replace("snapdragon", "s").replaceAll("\\belite\\b", "e").replaceAll("\\bgen\\b", "g");
+        return compact.replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -82,7 +115,8 @@ public final class ContainerCatalog {
                 }
                 result.add(new Entry(object.optString("id", url), name, gameId, gameName, gameVersion,
                         object.optString("description", "").trim(), tags, url,
-                        ContentsManager.normalizeChannel(object.optString("channel", ""))));
+                        ContentsManager.normalizeChannel(object.optString("channel", "")),
+                        strings(object.opt("compatibility")), strings(object.opt("testedOn"))));
             }
             return result;
         } catch (Exception e) {

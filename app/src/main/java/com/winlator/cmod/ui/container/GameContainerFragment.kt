@@ -399,6 +399,20 @@ private fun ConfigList(configs: List<ContainerCatalog.Entry>, selected: String?,
                         if (c.description.isNotEmpty()) {
                             Text(c.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        if (c.testedOn.isNotEmpty()) {
+                            Text(
+                                "Tested on: " + c.testedOn.joinToString(", "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (c.compatibility.isNotEmpty()) {
+                            Text(
+                                "Compatible with: " + c.compatibility.joinToString(", ") { ContainerCatalog.shortProcessorName(it) },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (c.tags.isNotEmpty()) {
                             Spacer(Modifier.height(6.dp))
                             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

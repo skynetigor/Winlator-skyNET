@@ -86,6 +86,8 @@ public final class LinuxRuntimeInstaller {
 
     /** Returns null on success or a short message; {@link #CANCELLED} if the user cancelled. */
     public static synchronized String install(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
+        // A driver is a zip that the driver manager unpacks, not a tarball.
+        if (LinuxPackages.KIND_DRIVER.equals(entry.kind)) return installDriver(context, entry, progress);
         cancelRequested = false;
         installing = true;
         File runtimes = LinuxPackages.baseDir(context, entry.kind);
@@ -137,6 +139,36 @@ public final class LinuxRuntimeInstaller {
         finally {
             installing = false;
             if (staging.exists()) FileUtils.delete(staging);
+        }
+    }
+
+    /** A Turnip zip of the catalog: downloaded and checked like a runtime, then installed by {@link LinuxDriverManager}. */
+    private static String installDriver(Context context, LinuxRuntimeCatalog.Entry entry, Progress progress) {
+        cancelRequested = false;
+        installing = true;
+        File part = partFile(context, entry);
+        try {
+            downloadDir(context).mkdirs();
+            if (!download(entry, part, progress)) return "Download failed";
+            progress.onProgress(Phase.VERIFY, 0);
+            if (!entry.sha256.equalsIgnoreCase(sha256(part, progress))) {
+                part.delete();
+                return "Checksum mismatch";
+            }
+            progress.onProgress(Phase.EXTRACT, 0);
+            String error = LinuxDriverManager.install(context, android.net.Uri.fromFile(part), entry.id + ".zip").error;
+            part.delete();
+            return error;
+        }
+        catch (CancelledException e) {
+            return CANCELLED;
+        }
+        catch (Exception e) {
+            Log.e(TAG, "Driver install failed", e);
+            return "Install failed: " + e.getMessage();
+        }
+        finally {
+            installing = false;
         }
     }
 

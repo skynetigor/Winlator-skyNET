@@ -60,6 +60,10 @@ interface OnboardingCallbacks {
     fun onRuntimeSelected(runtimeIdentifier: String)
     /** The user chose to skip installing Wine/Proton and creating the first container. */
     fun onSkipSetup()
+    /** A first container made another way than the Windows setup of the next pages: opened in the app once the permissions are granted. */
+    fun onChooseStart(start: String)
+    /** The gear on the start screen: leave the setup and open the app's settings. */
+    fun onOpenSettings()
     fun onRequestPermissions()
     fun onRetryCore()
     fun onCloseComponents()
@@ -171,7 +175,7 @@ object OnboardingComposeHost {
     }
 }
 
-private enum class OnboardingPage { Welcome, Theme, Components, Runtime, Access }
+private enum class OnboardingPage { Welcome, Theme, Create, Components, Runtime, Access }
 
 private fun prepareInitialContainer(
     activity: ComponentActivity,
@@ -263,6 +267,9 @@ private fun OnboardingFlow(
         mutableStateOf(if (managerMode) OnboardingPage.Components else OnboardingPage.Theme)
     }
 
+    // Set when the first container is not made by the Windows pages: the permissions page then goes back to the start screen.
+    var startedElsewhere by rememberSaveable { mutableStateOf(false) }
+
     val hasInstalledRuntime = bundledInstalled.value || components.value.any {
         it.installed && (it.type == "Wine" || it.type == "Proton") && !it.runtimeIdentifier.isNullOrBlank()
     }
@@ -283,7 +290,29 @@ private fun OnboardingFlow(
         )
 
         OnboardingPage.Theme -> OnboardingThemeScreen(
-            onContinue = { page = OnboardingPage.Components }
+            onContinue = { page = OnboardingPage.Create }
+        )
+
+        OnboardingPage.Create -> OnboardingCreateScreen(
+            onChoose = { start ->
+                if (start == ContainerStart.Windows) {
+                    startedElsewhere = false
+                    cb.onChooseStart("")
+                    page = OnboardingPage.Components
+                } else {
+                    startedElsewhere = true
+                    cb.onSkipSetup()
+                    cb.onChooseStart(start.name.lowercase())
+                    page = OnboardingPage.Access
+                }
+            },
+            onSettings = { cb.onOpenSettings() },
+            onSkip = {
+                startedElsewhere = true
+                cb.onSkipSetup()
+                cb.onChooseStart("")
+                page = OnboardingPage.Access
+            }
         )
 
         OnboardingPage.Components -> OnboardingComponentsScreen(
@@ -298,7 +327,7 @@ private fun OnboardingFlow(
             managerMode = managerMode,
             onBack = {
                 if (managerMode) cb.onCloseComponents()
-                else page = OnboardingPage.Theme
+                else page = OnboardingPage.Create
             },
             onContinue = {
                 if (managerMode) cb.onCloseComponents()
@@ -330,7 +359,7 @@ private fun OnboardingFlow(
         )
 
         OnboardingPage.Access -> OnboardingAccessScreen(
-            back = { page = OnboardingPage.Runtime },
+            back = { page = if (startedElsewhere) OnboardingPage.Create else OnboardingPage.Runtime },
             next = { cb.onRequestPermissions() }
         )
     }

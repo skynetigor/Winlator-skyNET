@@ -69,6 +69,16 @@ public class PreloaderDialog {
         }
     }
 
+    /** Replaces the status line of the shown dialog (from any thread), e.g. with the progress of a download. */
+    public void setStatusText(String text) {
+        activity.runOnUiThread(() -> {
+            if (dialog == null) return;
+            View info = dialog.findViewById(R.id.LaunchInfo);
+            TextView view = dialog.findViewById(info != null && info.getVisibility() == View.VISIBLE ? R.id.LaunchStatus : R.id.TextView);
+            if (view != null) view.setText(text);
+        });
+    }
+
     public synchronized void show(int textResId) {
         if (activity.isFinishing() || activity.isDestroyed()) return;
         if (isShowing()) return;

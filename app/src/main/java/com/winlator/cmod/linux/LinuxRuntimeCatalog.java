@@ -81,7 +81,7 @@ public final class LinuxRuntimeCatalog {
     }
 
     private static final String SKYNET_CATALOG_URL =
-            "https://raw.githubusercontent.com/skynetigor/winlator-skynet-components/main/linux.json";
+            com.winlator.cmod.contents.ContentsManager.COMPONENTS_BASE + "linux.json";
 
     /** Blocking. The x86 emulators that can be installed; null when the catalog cannot be read. */
     public static List<Entry> fetchEmulators() {
