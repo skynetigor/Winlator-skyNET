@@ -168,6 +168,27 @@ public final class LinuxSession {
                         + "[ \"$code\" = 42 ] || break; done; exit $code"};
     }
 
+    /**
+     * A game's data folders left on shared storage. Shared storage cannot run programs, but a game only reads its data,
+     * so only its program folder is copied and the rest is bound in beside it (a bind, unlike a symbolic link, is not
+     * seen by the game as one). Each line of programs/<game>/.binds is "host path, tab, guest path".
+     */
+    private static void bindDataFolders(List<String> argv, File home) {
+        File[] games = new File(home, "programs").listFiles(File::isDirectory);
+        if (games == null) return;
+        for (File game : games) {
+            File list = new File(game, ".binds");
+            if (!list.isFile()) continue;
+            for (String line : FileUtils.readLines(list)) {
+                int tab = line.indexOf('\t');
+                if (tab <= 0) continue;
+                File host = new File(line.substring(0, tab));
+                if (host.exists()) bind(argv, host.getPath(), line.substring(tab + 1));
+                else Log.w(TAG, "The game's data is missing: " + host);
+            }
+        }
+    }
+
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
         File rt = LinuxRuntime.rootDir(context, runtime.id);
@@ -243,6 +264,7 @@ public final class LinuxSession {
         bind(argv, imageFsRoot.getPath());
         bind(argv, "/storage/emulated/0");
         bind(argv, home.getPath(), "/root");
+        bindDataFolders(argv, home);
         bind(argv, new File(imageFsRoot, "usr/tmp/.X11-unix").getPath(), "/tmp/.X11-unix");
 
         argv.add("/usr/bin/env");

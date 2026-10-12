@@ -435,6 +435,39 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             }
         }
 
+        /** Copies only the program's folder; the rest of the game stays where it is and is bound in beside it. */
+        fun copyProgramAndBindData(game: File, programFolder: File) {
+            pendingCopy = null
+            copying = true
+            Executors.newSingleThreadExecutor().execute {
+                val target = freeFolder(File(container.linuxHomeDir, "programs"), game.name)
+                var ok = false
+                try {
+                    target.mkdirs()
+                    ok = FileUtils.copy(programFolder, File(target, programFolder.name), Callback<File> { copied -> FileUtils.chmod(copied, 505) })
+                    if (ok) {
+                        // The places the data is bound to must exist, or the game does not see them when it lists the folder.
+                        val binds = StringBuilder()
+                        for (entry in game.listFiles().orEmpty()) {
+                            if (entry.name == programFolder.name) continue
+                            val place = File(target, entry.name)
+                            if (entry.isDirectory) place.mkdirs() else place.createNewFile()
+                            binds.append(entry.path).append('\t').append("/root/programs/${target.name}/${entry.name}").append('\n')
+                        }
+                        File(target, ".binds").writeText(binds.toString())
+                    }
+                } catch (e: Exception) {
+                    ok = false
+                }
+                if (!ok) FileUtils.delete(target)
+                main.post {
+                    copying = false
+                    if (ok) addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/${programFolder.name}/${file.name}")
+                    else Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { pendingCopy = null },
             title = { Text("Copy into the container?") },
@@ -443,12 +476,13 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                     "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
                         "(${formatSize(pendingCopySize)}) will be copied into this container." +
                         if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
-                            "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead." else ""
+                            "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead, or only the program and read the rest from storage." else ""
                 )
             },
             confirmButton = {
-                Row {
+                Column(horizontalAlignment = Alignment.End) {
                     if (gameFolder != null) {
+                        TextButton(onClick = { copyProgramAndBindData(gameFolder, folder) }) { Text("Program only, data stays on storage") }
                         TextButton(onClick = { copyAndAdd(gameFolder, "${folder.name}/") }) { Text("Whole game") }
                     }
                     TextButton(onClick = { copyAndAdd(folder, "") }) { Text("Folder only") }
