@@ -571,6 +571,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isRelativeMouseMovement = shortcut.getExtra("enableRelativeMouse").equals("1");
             isMouseDisabled = shortcut.getExtra("disableMouse").equals("1");
         }
+        if (linuxSession) {
+            // A Linux program is used by touch: the container says whether a finger acts where it touches (on by default),
+            // and a shortcut may say otherwise.
+            String own = shortcut != null ? shortcut.getExtra("simTouchScreen") : "";
+            simulateTouchScreen = !own.isEmpty() ? own.equals("1") : !"0".equals(container.getExtra(LinuxSession.EXTRA_TOUCHSCREEN));
+        }
 
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
         this.dxwrapperConfig = DXVKConfigDialog.parseConfig(dxwrapperConfig);
@@ -1411,8 +1417,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = LinuxSession.programCommand(this, container, shortcut.path,
-                shortcut.getExtra(com.winlator.cmod.linux.LinuxLaunchOptions.EXTRA));
+        String[] command = LinuxSession.programCommand(this, container, shortcut);
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.
@@ -1589,11 +1594,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             String simTouchScreen = shortcut.getExtra("simTouchScreen");
-            touchpadView.setSimTouchScreen(simTouchScreen.equals("1"));
+            touchpadView.setSimTouchScreen(linuxSession ? simulateTouchScreen : simTouchScreen.equals("1"));
             if (simulateTouchScreen) {
                 renderer.setCursorVisible(false);
             }
         }
+        else if (linuxSession && simulateTouchScreen) {
+            // A container started without a shortcut (its desktop).
+            touchpadView.setSimTouchScreen(true);
+            renderer.setCursorVisible(false);
+        }
+        if (linuxSession) setupLinuxKeyboard(rootView);
 
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 
@@ -2332,6 +2343,51 @@ public class XServerDisplayActivity extends AppCompatActivity {
         int width = Math.max(bounds.width(), bounds.height());
         int height = Math.min(bounds.width(), bounds.height());
         return width + "x" + height;
+    }
+
+    private boolean keyboardShown() {
+        androidx.core.view.WindowInsetsCompat insets = androidx.core.view.ViewCompat.getRootWindowInsets(getWindow().getDecorView());
+        return insets != null && insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime());
+    }
+
+    /**
+     * The on-screen keyboard in a Linux session: a button that opens and closes it, and (unless the container turns it
+     * off) it opens by itself when a tap lands on a text field. X11 does not tell the server that a field has the focus,
+     * but the program shows its text cursor (an I-beam) over one, so that is what is looked for after a tap.
+     */
+    private void setupLinuxKeyboard(FrameLayout rootView) {
+        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON))) {
+            android.widget.ImageButton button = new android.widget.ImageButton(this);
+            button.setImageResource(android.R.drawable.ic_menu_edit);
+            android.graphics.drawable.GradientDrawable shape = new android.graphics.drawable.GradientDrawable();
+            shape.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            shape.setColor(0xcc202428);
+            button.setBackground(shape);
+            button.setColorFilter(0xffffffff);
+            button.setAlpha(0.6f);
+            button.setContentDescription("Keyboard");
+            int size = (int) (52 * getResources().getDisplayMetrics().density);
+            int margin = (int) (14 * getResources().getDisplayMetrics().density);
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(size, size, android.view.Gravity.BOTTOM | android.view.Gravity.END);
+            params.setMargins(margin, margin, margin, margin);
+            button.setOnClickListener(v -> AppUtils.showKeyboard(this));
+            rootView.addView(button, params);
+        }
+        if (!"0".equals(container.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD))) {
+            touchpadView.setFingerUpCallback(() -> {
+                // The program changes the cursor when the pointer arrives over a field, and a slow one takes a while: look
+                // again a few times after the tap. The keyboard opens when a text cursor is seen. It is never closed from
+                // here: a program that does not show one (a web view such as Steam's) would then lose the keyboard it was
+                // given with the button at every tap.
+                for (int delay : new int[]{300, 800, 1500}) {
+                    handler.postDelayed(() -> {
+                        com.winlator.cmod.xserver.Window under = xServer.inputDeviceManager.getPointWindow();
+                        com.winlator.cmod.xserver.Cursor cursor = under != null ? under.attributes.getCursor() : null;
+                        if (com.winlator.cmod.xserver.TextCursor.isTextCursor(cursor) && !keyboardShown()) AppUtils.showKeyboard(this);
+                    }, delay);
+                }
+            });
+        }
     }
 
     /** A change from the sidebar: kept on the shortcut when the shortcut has its own frame generation, else on the container. */

@@ -45,6 +45,7 @@ public class TouchpadView extends View {
     private boolean scrolling = false;
     private final XServer xServer;
     private Runnable fourFingersTapCallback;
+    private Runnable fingerUpCallback;
     private final float[] xform = XForm.getInstance();
     private boolean simTouchScreen = false;
     private boolean continueClick = true;
@@ -449,6 +450,7 @@ public class TouchpadView extends View {
 
 
     private void handleFingerUp(Finger finger1) {
+        if (fingerUpCallback != null) fingerUpCallback.run();
         switch (numFingers) {
             case 1:
                 if (simTouchScreen) {
@@ -624,6 +626,11 @@ public class TouchpadView extends View {
 
     public void setPointerButtonRightEnabled(boolean pointerButtonRightEnabled) {
         this.pointerButtonRightEnabled = pointerButtonRightEnabled;
+    }
+
+    /** Called when a finger is lifted (after the click it makes has been handed to the X server). */
+    public void setFingerUpCallback(Runnable fingerUpCallback) {
+        this.fingerUpCallback = fingerUpCallback;
     }
 
     public void setFourFingersTapCallback(Runnable fourFingersTapCallback) {

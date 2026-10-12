@@ -262,9 +262,22 @@ public class Shortcut {
         }
     }
 
-    /** A shortcut the container owns (the Steam client of a Linux container): no editing, no removal. */
+    /**
+     * A shortcut the container owns: the Steam client of a Linux container and the games installed in it. It cannot be
+     * removed (the games' follow Steam: a game uninstalled there loses its shortcut) and has no icon to change.
+     */
     public boolean isContainerOwned() {
+        return container.isLinux()
+                && (com.winlator.cmod.linux.LinuxSession.isSteam(path) || com.winlator.cmod.linux.LinuxSession.isSteamGame(path));
+    }
+
+    /** The Steam client's own shortcut has nothing to set; a Steam game's settings (resolution, scaling, ...) can be changed. */
+    public boolean hasFixedSettings() {
         return container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(path);
+    }
+
+    public boolean isSteamGame() {
+        return container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteamGame(path);
     }
 
     public int getContainerId() {

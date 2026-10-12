@@ -517,6 +517,27 @@ private fun SettingsContainerCard(
                         "Linux • $runtime • ${container.screenSize}"
                     } else "${container.wineVersion} • ${container.screenSize}"
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (container.isLinux && container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM) == "1") {
+                        // A container with the Steam client: a badge and how many games Steam has installed in it.
+                        val games = com.winlator.cmod.linux.LinuxSteamGames.count(container)
+                        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                                Text(
+                                    "STEAM",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Text(
+                                if (games == 0) "no games installed" else if (games == 1) "1 game" else "$games games",
+                                modifier = Modifier.padding(start = 8.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
                 Surface(
                     onClick = { onRun(container.id) },

@@ -9,8 +9,13 @@
  * $SKY_INPUT_DIR/event<N> (see FakeInputWriter). Programs that open /dev/input/event<N> (SDL does, when told with
  * SDL_JOYSTICK_DEVICE) are given that file, and its ioctls are answered as an Xbox 360 pad.
  *
+ * x86-64 programs (aarch64 build only): there is no binfmt_misc here, so a native program that starts an x86-64 one (the
+ * Steam client starting a game) would get "Exec format error". When $SKY_X86_EMULATOR names an emulator (Box64), the exec
+ * and spawn functions put it in front of any program whose ELF header says x86-64.
+ *
  * Interposed: socket, bind, getsockname, setsockopt, getsockopt, close, open, open64, stat, stat64, lstat, lstat64,
- * ioctl, read. Everything else goes to libc unchanged.
+ * ioctl, read, and (aarch64) execve, execv, execvp, execvpe, execl, execlp, execle, posix_spawn, posix_spawnp.
+ * Everything else goes to libc unchanged.
  *
  * MIT licence, written for this project.
  */
@@ -30,6 +35,8 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sys/syscall.h>
+#include <spawn.h>
 
 #define MAX_FAKE 32
 static int fake_fds[MAX_FAKE];
@@ -359,30 +366,184 @@ int close(int fd) {
     return real(fd);
 }
 
-/* ---- SDL event trace (debugging) -----------------------------------------------------------------------------
- * With the file /root/.sdltrace present, SDL_PollEvent / SDL_PeepEvents results are logged to /root/sdltrace.log
- * (event type and, for mouse buttons and gamepad events, the first words). Off by default. */
-static int sdl_trace_on(void) {
-    static int state = -1;
-    if (state < 0) state = access("/root/.sdltrace", F_OK) == 0;
-    return state;
+/* (An SDL_PollEvent trace used to be here. A game that loads SDL after this library, as Counter-Strike: Source does, resolved
+ * its SDL_PollEvent to the trace's, which found no SDL behind it and called a null pointer.) */
+
+/* ---- x86-64 programs through an emulator ------------------------------------------------------------------------- */
+#if defined(__aarch64__)
+extern char **environ;
+
+static const char *x86_emulator(void) {
+    static const char *emulator;
+    static int looked;
+    if (!looked) {
+        emulator = getenv("SKY_X86_EMULATOR");
+        if (emulator && !*emulator) emulator = NULL;
+        looked = 1;
+    }
+    return emulator;
 }
 
-static void sdl_log(const char *func, const unsigned int *e) {
-    unsigned int t = e[0];
-    if (t == 0x400 || t == 0x1000 || t == 0x1001 || t == 0x7f00 || (t >= 0x7000 && t < 0x8000)) return; // motion / frame noise
-    static int fd = -1;
-    if (fd < 0) fd = open("/root/sdltrace.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0) return;
-    char b[200];
-    int n = snprintf(b, sizeof b, "%s type=0x%x w=%08x %08x %08x %08x %08x\n", func, t, e[1], e[2], e[3], e[4], e[5]);
-    write(fd, b, n);
+/* Whether the file at path is a 64-bit x86 ELF (e_machine 62). */
+static int is_x86_64(const char *path) {
+    unsigned char header[20];
+    int fd = syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    ssize_t n = syscall(SYS_read, fd, header, sizeof header);
+    syscall(SYS_close, fd);
+    return n == (ssize_t)sizeof header && memcmp(header, "\177ELF", 4) == 0 && header[4] == 2 && header[18] == 62 && header[19] == 0;
 }
 
-int SDL_PollEvent(void *event) {
-    static int (*real)(void *);
-    if (!real) real = dlsym(RTLD_NEXT, "SDL_PollEvent");
-    int r = real(event);
-    if (r && event && sdl_trace_on()) sdl_log("SDL_PollEvent", event);
-    return r;
+/* argv with the emulator and the program in front; NULL if it cannot be built. */
+static char **with_emulator(const char *emulator, const char *path, char *const argv[]) {
+    size_t argc = 0;
+    while (argv && argv[argc]) argc++;
+    char **result = malloc((argc + 3) * sizeof(char *));
+    if (!result) return NULL;
+    result[0] = (char *)emulator;
+    result[1] = (char *)path;
+    for (size_t i = 1; i < argc; i++) result[i + 1] = argv[i];
+    result[argc > 0 ? argc + 1 : 2] = NULL;
+    return result;
 }
+
+/* The file execvp would run: file itself if it has a slash, else the first match along PATH. */
+static const char *search_path(const char *file, char *buffer, size_t size) {
+    if (strchr(file, '/')) return file;
+    const char *path = getenv("PATH");
+    if (!path) path = "/usr/local/bin:/usr/bin:/bin";
+    size_t length = strlen(file);
+    while (*path) {
+        const char *end = strchr(path, ':');
+        size_t part = end ? (size_t)(end - path) : strlen(path);
+        if (part + 1 + length + 1 <= size) {
+            memcpy(buffer, part ? path : ".", part ? part : 1);
+            size_t at = part ? part : 1;
+            buffer[at++] = '/';
+            memcpy(buffer + at, file, length + 1);
+            if (access(buffer, X_OK) == 0) return buffer;
+        }
+        if (!end) break;
+        path = end + 1;
+    }
+    return NULL;
+}
+
+int execve(const char *path, char *const argv[], char *const envp[]) {
+    static int (*real)(const char *, char *const[], char *const[]);
+    if (!real) real = dlsym(RTLD_NEXT, "execve");
+    const char *emulator = x86_emulator();
+    if (emulator && path && is_x86_64(path)) {
+        char **wrapped = with_emulator(emulator, path, argv);
+        if (wrapped) {
+            int result = real(emulator, wrapped, envp);
+            int saved = errno;
+            free(wrapped);
+            errno = saved;
+            return result;
+        }
+    }
+    return real(path, argv, envp);
+}
+
+int execv(const char *path, char *const argv[]) {
+    return execve(path, argv, environ);
+}
+
+int execvpe(const char *file, char *const argv[], char *const envp[]) {
+    char buffer[4096];
+    const char *found = file ? search_path(file, buffer, sizeof buffer) : NULL;
+    if (found) {
+        const char *emulator = x86_emulator();
+        if (emulator && is_x86_64(found)) return execve(found, argv, envp);
+    }
+    static int (*real)(const char *, char *const[], char *const[]);
+    if (!real) real = dlsym(RTLD_NEXT, "execvpe");
+    return real(file, argv, envp);
+}
+
+int execvp(const char *file, char *const argv[]) {
+    return execvpe(file, argv, environ);
+}
+
+/* The execl family: gather the arguments into an array and call the functions above. */
+#define GATHER(first, list) \
+    size_t count = 1; \
+    va_list probe; va_start(probe, first); \
+    while (va_arg(probe, char *)) count++; \
+    va_end(probe); \
+    char **list = malloc((count + 1) * sizeof(char *)); \
+    if (!list) { errno = ENOMEM; return -1; } \
+    va_list args; va_start(args, first); \
+    list[0] = (char *)first; \
+    for (size_t i = 1; i <= count; i++) list[i] = va_arg(args, char *); \
+    va_end(args)
+
+int execl(const char *path, const char *arg, ...) {
+    GATHER(arg, list);
+    int result = execve(path, list, environ);
+    int saved = errno; free(list); errno = saved;
+    return result;
+}
+
+int execlp(const char *file, const char *arg, ...) {
+    GATHER(arg, list);
+    int result = execvpe(file, list, environ);
+    int saved = errno; free(list); errno = saved;
+    return result;
+}
+
+int execle(const char *path, const char *arg, ...) {
+    size_t count = 1;
+    va_list probe;
+    va_start(probe, arg);
+    while (va_arg(probe, char *)) count++;
+    va_end(probe);
+    char **list = malloc((count + 1) * sizeof(char *));
+    if (!list) { errno = ENOMEM; return -1; }
+    va_list args;
+    va_start(args, arg);
+    list[0] = (char *)arg;
+    for (size_t i = 1; i <= count; i++) list[i] = va_arg(args, char *);
+    char *const *envp = va_arg(args, char *const *);
+    va_end(args);
+    int result = execve(path, list, envp);
+    int saved = errno; free(list); errno = saved;
+    return result;
+}
+
+typedef int (*spawn_fn)(pid_t *, const char *, const posix_spawn_file_actions_t *, const posix_spawnattr_t *,
+                        char *const[], char *const[]);
+
+static int spawn_wrapped(spawn_fn real, int search, pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions,
+                         const posix_spawnattr_t *attr, char *const argv[], char *const envp[]) {
+    const char *emulator = x86_emulator();
+    if (emulator && file) {
+        char buffer[4096];
+        const char *found = search ? search_path(file, buffer, sizeof buffer) : file;
+        if (found && is_x86_64(found)) {
+            char **wrapped = with_emulator(emulator, found, argv);
+            if (wrapped) {
+                int result = real(pid, emulator, actions, attr, wrapped, envp);
+                free(wrapped);
+                return result;
+            }
+        }
+    }
+    return real(pid, file, actions, attr, argv, envp);
+}
+
+int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+                char *const argv[], char *const envp[]) {
+    static spawn_fn real;
+    if (!real) real = (spawn_fn)dlsym(RTLD_NEXT, "posix_spawn");
+    return spawn_wrapped(real, 0, pid, path, actions, attr, argv, envp);
+}
+
+int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *actions, const posix_spawnattr_t *attr,
+                 char *const argv[], char *const envp[]) {
+    static spawn_fn real;
+    if (!real) real = (spawn_fn)dlsym(RTLD_NEXT, "posix_spawnp");
+    return spawn_wrapped(real, 1, pid, file, actions, attr, argv, envp);
+}
+#endif /* __aarch64__ */

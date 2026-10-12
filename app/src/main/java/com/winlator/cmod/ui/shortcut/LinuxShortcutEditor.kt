@@ -59,6 +59,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
     var size by remember { mutableStateOf(shortcut.getExtra(SIZE)) }
     var fit by remember { mutableStateOf(shortcut.getExtra(FIT)) }
     var upscaler by remember { mutableStateOf(shortcut.getExtra(UPSCALER)) }
+    var touch by remember { mutableStateOf(shortcut.getExtra("simTouchScreen")) }
+    var steamClient by remember { mutableStateOf(shortcut.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL)) }
     var multiplier by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER)) }
     var flowScale by remember { mutableStateOf(shortcut.getExtra(LsfgManager.EXTRA_FLOW_SCALE)) }
 
@@ -86,6 +88,8 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         shortcut.putExtra(LinuxLaunchOptions.EXTRA, text.ifEmpty { null })
         shortcut.putExtra(SIZE, size.trim().ifEmpty { null })
         shortcut.putExtra(FIT, fit.ifEmpty { null })
+        shortcut.putExtra("simTouchScreen", touch.ifEmpty { null })
+        shortcut.putExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM_MINIMAL, steamClient.ifEmpty { null })
         shortcut.putExtra(UPSCALER, upscaler.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, multiplier.ifEmpty { null })
         shortcut.putExtra(LsfgManager.EXTRA_FLOW_SCALE, flowScale.ifEmpty { null })
@@ -105,8 +109,9 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
         else -> "${multiplier}x" + if (flowScale.isNotEmpty()) " · flow $flowScale" else ""
     }
 
-    val categories = listOf(
-        EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
+    val categories = listOfNotNull(
+        // Steam starts its own games and has launch options of its own (in the game's properties in Steam).
+        if (shortcut.isSteamGame) null else EditorCategory("launch", "Launch options", options.ifBlank { "None" }, false) {
             OutlinedTextField(
                 value = options,
                 onValueChange = { options = it },
@@ -181,6 +186,46 @@ internal fun LinuxShortcutEditor(shortcut: Shortcut, onClose: () -> Unit) {
             Text(
                 "Works with native output only (the container's \"Software Vulkan output\" off). Changes made in the " +
                     "game's sidebar are kept on the shortcut once it has its own multiplier.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        EditorCategory(
+            "input", "Input",
+            when (touch) { "1" -> "touchscreen"; "0" -> "touchpad"; else -> "container default" },
+            false
+        ) {
+            SettingsCard {
+                SettingMappedChoice(
+                    "Touchscreen mode",
+                    touch,
+                    linkedMapOf(
+                        "" to "Container default (${if (container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_TOUCHSCREEN) == "0") "touchpad" else "touchscreen"})",
+                        "1" to "Touchscreen: a tap clicks where you touch",
+                        "0" to "Touchpad: a finger moves the pointer"
+                    )
+                ) { touch = it }
+            }
+        },
+        if (!shortcut.isSteamGame) null else EditorCategory(
+            "steam", "Steam client",
+            if (steamClient == "0") "the whole client" else "minimal (no window)",
+            false
+        ) {
+            SettingsCard {
+                SettingMappedChoice(
+                    "Steam client",
+                    steamClient,
+                    linkedMapOf(
+                        "" to "Minimal: no Steam window, saves memory (once you are signed in)",
+                        "0" to "Whole client: its window stays open"
+                    )
+                ) { steamClient = it }
+            }
+            Text(
+                "To start a game the Steam client needs neither its window nor the web helper that draws it, which takes " +
+                    "most of its memory. The minimal start works once you have signed in with \"Remember me\"; until then the " +
+                    "whole client opens so that you can.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

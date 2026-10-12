@@ -191,7 +191,12 @@ private fun LinuxContainerEditor(
     var fexPreset by remember {
         mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() } ?: FEXCorePreset.INTERMEDIATE)
     }
+    // Input: a finger acts where it touches, a button opens the keyboard, and a tap on a text field opens it by itself.
+    var touchscreen by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_TOUCHSCREEN) != "0") }
+    var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
+    var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
     var startSteam by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM) == "1") }
+    var steamBigPicture by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM_BIG_PICTURE) == "1") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var glDriver by remember {
         mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
@@ -279,6 +284,10 @@ private fun LinuxContainerEditor(
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_STEAM, if (startSteam) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_STEAM_BIG_PICTURE, if (steamBigPicture) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, if (keyboardButton) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, if (autoKeyboard) "1" else "0")
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
         container.putExtra("graphicsFilterMode", upscaler)
@@ -413,6 +422,15 @@ private fun LinuxContainerEditor(
                 }
                 SettingsDivider()
                 SettingToggle("Start the Steam client with the container", startSteam) { startSteam = it }
+                SettingsDivider()
+                SettingToggle("Steam in Big Picture mode (fills the screen)", steamBigPicture) { steamBigPicture = it }
+                Text(
+                    "Steam's desktop window is about 1280x800 and does not fit a smaller screen; Big Picture is its full-screen " +
+                        "interface and is made for touch. A larger resolution (or Native) also fits the desktop window.",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text(
                     "Starts the runtime's Steam client beside the game. The first start downloads it (1-2 minutes); its log is Winlator/logs/linux-steam.log.",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -543,6 +561,33 @@ private fun LinuxContainerEditor(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        },
+        EditorCategory(
+            "input", "Input",
+            (if (touchscreen) "touchscreen" else "touchpad") + (if (keyboardButton) " · keyboard button" else "") +
+                (if (autoKeyboard) " · auto keyboard" else ""),
+            false
+        ) {
+            SettingsCard {
+                SettingToggle("Touchscreen mode (a tap clicks where you touch)", touchscreen) { touchscreen = it }
+                Text(
+                    "Off: the screen works like a laptop's touchpad, a finger moves the pointer and a tap clicks under it.",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                SettingsDivider()
+                SettingToggle("Keyboard button on the screen", keyboardButton) { keyboardButton = it }
+                SettingsDivider()
+                SettingToggle("Open the keyboard when a text field is tapped", autoKeyboard) { autoKeyboard = it }
+                Text(
+                    "A program shows a text cursor over an editable field; the keyboard opens when one is under the finger. Not " +
+                        "every program does (a web view such as the Steam client's does not): the button always works.",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         },
         EditorCategory(
             "performance", "Performance",

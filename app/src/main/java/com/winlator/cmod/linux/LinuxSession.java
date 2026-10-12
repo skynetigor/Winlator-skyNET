@@ -42,6 +42,16 @@ public final class LinuxSession {
     public static final String EXTRA_GL_DRIVER = "linuxGlDriver";
     /** "1" when the Steam client is started with the container. */
     public static final String EXTRA_STEAM = "linuxSteam";
+    /** "0" when a finger should not act where it touches (the touchpad way is used); on when absent. */
+    public static final String EXTRA_TOUCHSCREEN = "linuxTouchscreen";
+    /** "1": the Steam client of the container opens in Big Picture mode, which fills the screen. */
+    public static final String EXTRA_STEAM_BIG_PICTURE = "linuxSteamBigPicture";
+    /** On a Steam game's shortcut: "0" starts the whole Steam client; absent, the client starts without its window. */
+    public static final String EXTRA_STEAM_MINIMAL = "steamMinimal";
+    /** "0" hides the button that opens the on-screen keyboard; shown when absent. */
+    public static final String EXTRA_KEYBOARD_BUTTON = "linuxKeyboardButton";
+    /** "0" stops the keyboard opening by itself when a text field is tapped; on when absent. */
+    public static final String EXTRA_AUTO_KEYBOARD = "linuxAutoKeyboard";
     private static final String HOST_DIR = "opt/android-host";
     private static final String PRELOAD = "/usr/local/lib/libblsession.so";
     private static final String FAKE_PROC_DIR = "etc/bannerlator/proc";
@@ -97,8 +107,23 @@ public final class LinuxSession {
     }
 
     /** As above, with the shortcut's launch options (see {@link LinuxLaunchOptions}): its variables, wrapper and arguments. */
+    public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut) {
+        // A Steam game starts the client without its window unless the shortcut asks for the whole client.
+        boolean minimal = !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL));
+        return programCommand(context, container, shortcut.path, shortcut.getExtra(LinuxLaunchOptions.EXTRA), minimal);
+    }
+
     public static String[] programCommand(Context context, Container container, String path, String launchOptions) {
-        if (isSteam(path)) return steamCommand();
+        return programCommand(context, container, path, launchOptions, true);
+    }
+
+    private static String[] programCommand(Context context, Container container, String path, String launchOptions, boolean steamMinimal) {
+        if (isSteam(path)) return steamCommand("", false, "1".equals(container.getExtra(EXTRA_STEAM_BIG_PICTURE)));
+        if (isSteamGame(path)) {
+            String appId = steamAppId(path);
+            if (!appId.matches("\\d+")) return refusal("Not a Steam game: " + path);
+            return steamCommand(appId, steamMinimal, false);
+        }
         LinuxLaunchOptions options = LinuxLaunchOptions.parse(launchOptions);
         String emulatorPath = "";
         int machine = elfMachine(hostFile(context, container, path));
@@ -145,12 +170,25 @@ public final class LinuxSession {
         return STEAM_PROGRAM.equals(path);
     }
 
+    /** The program of a shortcut for a game installed in the container's Steam: started through the client. */
+    public static final String STEAM_GAME_PREFIX = "steam://rungameid/";
+    /** The word after the script of a Steam session's command: what tells {@link #build} that the session runs the Steam client. */
+    private static final String STEAM_MARKER = "bannerlator-steam";
+
+    public static boolean isSteamGame(String path) {
+        return path != null && path.startsWith(STEAM_GAME_PREFIX) && path.length() > STEAM_GAME_PREFIX.length();
+    }
+
+    private static String steamAppId(String path) {
+        return path.substring(STEAM_GAME_PREFIX.length());
+    }
+
     /**
      * Runs the runtime's native arm64 Steam client on the container's own display (no gamescope). The first run
      * downloads the client (bannerlator-steam-install); its output goes to Winlator/logs/linux-steam.log on shared
      * storage. Files a killed session left behind are cleared first, as the runtime's own session does.
      */
-    private static String[] steamCommand() {
+    private static String[] steamCommand(String appId, boolean minimal, boolean bigPicture) {
         return new String[]{"/bin/bash", "-c",
                 "export XDG_DATA_HOME=\"${XDG_DATA_HOME:-$HOME/.local/share}\"; steam_root=\"$XDG_DATA_HOME/Steam\"; "
                         + "mkdir -p /storage/emulated/0/Winlator/logs; exec >/storage/emulated/0/Winlator/logs/linux-steam.log 2>&1; "
@@ -158,6 +196,14 @@ public final class LinuxSession {
                         // The runtime ships gawk (what awk links to) without the execute bit, and the installer needs awk.
                         + "chmod 755 /usr/bin/gawk; "
                         + "bannerlator-steam-install || exit 1; "
+                        // ~/.steam/sdk64 is where an x86-64 game looks for steamclient.so, and the installer points it at the arm64
+                        // client (which Box64 cannot load): the client's x86-64 copy is in linux64. sdkarm64 keeps the arm64 one.
+                        + "if [ -f \"$steam_root/linux64/steamclient.so\" ]; then mkdir -p \"$HOME/.steam\"; "
+                        + "ln -sfn \"$steam_root/linux64\" \"$HOME/.steam/sdk64\"; fi; "
+                        // Steam hands an x86 game to Valve's FEX tool; with Box64 the game's command is run directly instead.
+                        + "tool=\"$steam_root/steamapps/common/FEX-Emu/fex-compat-tool\"; "
+                        + "if [ -n \"$SKY_LAUNCHER\" ] && [ -f \"$tool\" ] && ! cmp -s \"$SKY_LAUNCHER\" \"$tool\"; then "
+                        + "[ -f \"$tool.orig\" ] || cp \"$tool\" \"$tool.orig\"; cp \"$SKY_LAUNCHER\" \"$tool\"; chmod 755 \"$tool\"; fi; "
                         // The client's own logs are in the container's private home: keep a copy on shared storage.
                         + "( while sleep 10; do mkdir -p /storage/emulated/0/Winlator/logs/steam-logs; "
                         + "cp -r \"$steam_root/logs/.\" /storage/emulated/0/Winlator/logs/steam-logs/ 2>/dev/null; done ) & "
@@ -166,9 +212,21 @@ public final class LinuxSession {
                         + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
                         // The client exits with 42 after updating itself and wants a fresh start; an update that cannot
                         // install asks again every time, so the restarts are capped.
+                        // $1: the game to start once the client is up (empty: just the client).
+                        + "game=\"$1\"; minimal=\"$2\"; extra=\"\"; "
+                        // Big Picture (the Steam Deck interface) fills the screen; the desktop interface is a window of about
+                        // 1280x800 that does not fit a smaller screen.
+                        + "[ \"$3\" = 1 ] && [ -z \"$game\" ] && extra=\"-gamepadui\"; "
+                        // To start a game the client needs no window and no web helper (the Chromium process that draws its
+                        // interface and takes most of its memory), but it cannot sign in without them: only when a login is
+                        // remembered does the game start that way.
+                        + "if [ -n \"$game\" ] && [ \"$minimal\" = 1 ] && grep -qs '\"RememberPassword\"[[:space:]]*\"1\"' "
+                        + "\"$steam_root/config/loginusers.vdf\"; then extra=\"$extra -silent -no-browser\"; fi; "
+                        + "echo \"== steam launch: game=$game minimal=$minimal flags=$extra\"; "
                         + "for try in 1 2 3 4; do \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
-                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11; code=$?; "
-                        + "[ \"$code\" = 42 ] || break; done; exit $code"};
+                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11 $extra ${game:+-applaunch $game}; code=$?; "
+                        + "[ \"$code\" = 42 ] || break; done; exit $code",
+                STEAM_MARKER, appId, minimal ? "1" : "0", bigPicture ? "1" : "0"};
     }
 
     /**
@@ -232,7 +290,6 @@ public final class LinuxSession {
         argv.add(rt.getPath());
         argv.add("-w");
         argv.add("/root");
-
         bind(argv, "/dev");
         bind(argv, "/proc");
         bind(argv, "/sys");
@@ -374,6 +431,13 @@ public final class LinuxSession {
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
             env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
             env.put("BOX64_NOBANNER", "1");
+            // The Steam client is an arm64 program and starts a game as it is, and there is no binfmt_misc to hand an
+            // x86-64 program to Box64 (proot's own -q does not work in this build). libskyshim's exec and spawn functions
+            // do it: any program that starts an x86-64 one gets it run through this emulator.
+            env.put("SKY_X86_EMULATOR", LinuxEmulator.binary(emulator).getPath());
+            // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
+            File launcher = stageAsset(context, "skynet-launcher.sh");
+            if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
             // An emulated program is an x86-64 process, so the session's aarch64 libraries are never loaded into it:
             // the shims it needs are preloaded again, built for that architecture.
             StringBuilder preload = new StringBuilder();

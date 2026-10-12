@@ -330,6 +330,9 @@ public class ContainerManager {
     public ArrayList<Shortcut> loadShortcuts() {
         ArrayList<Shortcut> shortcuts = new ArrayList<>();
         for (Container container : containers) {
+            // The games installed in a Linux container's Steam are shortcuts that follow Steam.
+            if (container.isLinux() && "1".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM)))
+                com.winlator.cmod.linux.LinuxSteamGames.sync(container);
             File desktopDir = container.getDesktopDir();
             ArrayList<File> files = new ArrayList<>();
             if (desktopDir.exists())
