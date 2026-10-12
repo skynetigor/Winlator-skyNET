@@ -617,6 +617,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         displayxConfig.put("precisePresentation", precisePresentation ? "1" : "0");
         if ("native".equals(screenSize.trim())) screenSize = nativeScreenSize();
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
+        if (linuxSession) {
+            // A Linux program can list the container's resolution and the standard ones below it and pick one (RandR): the
+            // screen takes its size, and the picture is scaled to the display as before.
+            com.winlator.cmod.xserver.extensions.RandrExtension randr =
+                    xServer.getExtension(com.winlator.cmod.xserver.extensions.RandrExtension.MAJOR_OPCODE);
+            randr.setModesEnabled(true);
+        }
         xServer.setWinHandler(winHandler);
         if (linuxSession) {
             // glibc clients cannot use these: MIT-SHM needs the app's bionic SysV shim, and DRI3 only takes the
@@ -1604,7 +1611,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             touchpadView.setSimTouchScreen(true);
             renderer.setCursorVisible(false);
         }
-        if (linuxSession) setupLinuxKeyboard(rootView);
+        if (linuxSession) {
+            setupLinuxKeyboard(rootView);
+            xServer.addOnScreenResizeListener((w, h) -> runOnUiThread(() -> touchpadView.onScreenResized()));
+        }
 
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
 

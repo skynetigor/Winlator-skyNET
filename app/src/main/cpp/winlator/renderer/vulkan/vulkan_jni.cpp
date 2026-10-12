@@ -156,6 +156,14 @@ Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetTransformAndScissor(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetScreenSize(
+    JNIEnv*, jobject, jlong handle, jint w, jint h)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setScreenSize(w, h);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_widget_VulkanXServerView_nativeSetPointerPos(
     JNIEnv*, jobject, jlong handle, jshort x, jshort y)
 {

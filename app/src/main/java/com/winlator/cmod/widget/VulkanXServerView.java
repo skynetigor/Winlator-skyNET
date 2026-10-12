@@ -126,6 +126,7 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
         boolean hasScissor, int scX, int scY, int scW, int scH);
     @FastNative private native void nativeSetPointerPos(long handle, short x, short y);
     @FastNative private native void nativeSetCursorVisible(long handle, boolean visible);
+    private native void nativeSetScreenSize(long handle, int width, int height);
     @FastNative private native void nativeUpdateCursorImage(long handle,
         ByteBuffer pixels, short width, short height, short stride, short hotX, short hotY);
     @FastNative private native void nativeRemoveWindow(long handle, long id);
@@ -233,6 +234,16 @@ public class VulkanXServerView extends XServerRendererView implements SurfaceHol
             }
             initComplete = true;
         });
+    }
+
+    @Override
+    public void onScreenResized() {
+        final int w = xServer.screenInfo.width, h = xServer.screenInfo.height;
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeSetScreenSize(nativeHandle, w, h);
+            viewTransformation.update(surfaceWidth, surfaceHeight, w, h);
+            updateTransform();
+        }
     }
 
     public void onSurfaceChanged(int width, int height) {

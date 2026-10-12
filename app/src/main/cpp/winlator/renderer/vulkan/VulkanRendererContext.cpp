@@ -1616,6 +1616,16 @@ void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy)
     needsRender.store(true); dirtyCV.notify_one();
 }
 
+void VulkanRendererContext::setScreenSize(int w, int h) {
+    {
+        std::lock_guard<std::mutex> lk(renderMutex);
+        containerWidth = w; containerHeight = h;
+        treeScreenW = w; treeScreenH = h;
+        treeDirty = true;
+    }
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
 void VulkanRendererContext::updatePointerPosition(short x, short y) {
     pointerX.store(x); pointerY.store(y);
     if (cursorVisible.load()) { cursorMoved.store(true); dirtyCV.notify_one(); }

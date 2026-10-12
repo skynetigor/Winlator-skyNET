@@ -214,6 +214,14 @@ public class WindowManager extends XResourceManager {
         return window;
     }
 
+    /** The screen changed size (RandR): the root window follows, with a new picture, and its listeners are told. */
+    public void resizeRootWindow(short width, short height) {
+        if (rootWindow.getWidth() == width && rootWindow.getHeight() == height) return;
+        changeWindowGeometry(rootWindow, (short)0, (short)0, width, height);
+        rootWindow.getContent().fillColor(0xff000000);
+        rootWindow.sendEvent(Event.STRUCTURE_NOTIFY, new ConfigureNotify(rootWindow, rootWindow, null, 0, 0, width, height, 0, false));
+    }
+
     private void changeWindowGeometry(Window window, short x, short y, short width, short height) {
         boolean resized = window.getWidth() != width || window.getHeight() != height;
         if (resized && window.hasEventListenerFor(Event.RESIZE_REDIRECT)) {

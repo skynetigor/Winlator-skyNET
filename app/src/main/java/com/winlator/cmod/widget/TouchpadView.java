@@ -106,6 +106,12 @@ public class TouchpadView extends View {
         resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
     }
 
+    /** The X screen changed size (a program picked another resolution): touches map onto the new one. */
+    public void onScreenResized() {
+        updateXform(getWidth(), getHeight(), xServer.screenInfo.width, xServer.screenInfo.height);
+        resolutionScale = 1000.0f / Math.min(xServer.screenInfo.width, xServer.screenInfo.height);
+    }
+
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
         ViewTransformation viewTransformation = new ViewTransformation();
         viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);

@@ -19,6 +19,9 @@ public abstract class XServerRendererView extends SurfaceView {
         this.xServer = xServer;
     }
 
+    /** The X screen changed size (a program picked another resolution): its size is the new one in xServer.screenInfo. */
+    public void onScreenResized() {}
+
     public abstract void onPause();
     public abstract void onResume();
     public abstract void onDestroy();

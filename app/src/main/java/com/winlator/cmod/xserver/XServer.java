@@ -240,11 +240,37 @@ public class XServer {
         extensions.put(MITSHMExtension.MAJOR_OPCODE, new MITSHMExtension());
         extensions.put(DRI3Extension.MAJOR_OPCODE, new DRI3Extension(this));
         extensions.put(PresentExtension.MAJOR_OPCODE, new PresentExtension(this));
-        extensions.put(RandrExtension.MAJOR_OPCODE, new RandrExtension(screenInfo));
+        extensions.put(RandrExtension.MAJOR_OPCODE, new RandrExtension(this));
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension(this));
         extensions.put(GLXExtension.MAJOR_OPCODE, new GLXExtension(this));
         extensions.put(XCompositeExtension.MAJOR_OPCODE, new XCompositeExtension(this));
         extensions.put(ScreenSaverExtension.MAJOR_OPCODE, new ScreenSaverExtension());
+    }
+
+    public interface OnScreenResizeListener {
+        void onScreenResized(int width, int height);
+    }
+
+    private final java.util.concurrent.CopyOnWriteArrayList<OnScreenResizeListener> screenResizeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addOnScreenResizeListener(OnScreenResizeListener listener) {
+        screenResizeListeners.add(listener);
+    }
+
+    /**
+     * The screen takes another size (a program set a RandR mode): the root window and its picture are replaced, the view
+     * is told and so are the listeners. Called from a request handler.
+     */
+    public void resizeScreen(int width, int height) {
+        width = Math.max(64, Math.min(width, 8192));
+        height = Math.max(64, Math.min(height, 8192));
+        if (screenInfo.width == width && screenInfo.height == height) return;
+        try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.DRAWABLE_MANAGER)) {
+            screenInfo.set(width, height);
+            windowManager.resizeRootWindow((short)width, (short)height);
+        }
+        if (xServerView != null) xServerView.onScreenResized();
+        for (OnScreenResizeListener listener : screenResizeListeners) listener.onScreenResized(width, height);
     }
 
     public <T extends Extension> T getExtension(int opcode) {

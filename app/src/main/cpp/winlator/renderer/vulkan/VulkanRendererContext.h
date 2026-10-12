@@ -204,6 +204,8 @@ public:
     std::vector<int> getSupportedPresentModes() const;
     VkExtent2D getSwapchainExtent() const { return swapchainExt; }
 
+    /** The X screen changed size (a program picked another resolution): scene coordinates are relative to this size. */
+    void setScreenSize(int w, int h);
     void setCustomScissor(int x, int y, int w, int h);
     void clearCustomScissor();
     inline void setTransformAndScissor(float ox, float oy, float sx, float sy,
