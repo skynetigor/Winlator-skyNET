@@ -37,6 +37,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -150,6 +151,22 @@ private fun documentPath(uri: Uri): String? {
     }
 }
 
+/** The folder of the container's programs/ that a program was copied into, or null for a program that lives elsewhere. */
+private fun copiedFolder(container: Container, path: String): File? {
+    val prefix = "/root/programs/"
+    if (!path.startsWith(prefix)) return null
+    val name = path.removePrefix(prefix).substringBefore('/')
+    if (name.isEmpty()) return null
+    return File(container.linuxHomeDir, "programs/$name").takeIf { it.isDirectory }
+}
+
+/** Copied folders that no shortcut starts a program from: what a copy that failed or was cut short leaves behind. */
+private fun unusedCopies(container: Container, programs: List<LinuxProgram>): List<File> {
+    val used = programs.mapNotNull { copiedFolder(container, it.path)?.name }.toSet()
+    val all = File(container.linuxHomeDir, "programs").listFiles { f -> f.isDirectory } ?: return emptyList()
+    return all.filter { it.name !in used }.sortedBy { it.name.lowercase(Locale.ROOT) }
+}
+
 private fun directorySize(dir: File): Long =
     if (dir.isFile) dir.length() else dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
@@ -175,6 +192,21 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     var pendingCopySize by remember { mutableStateOf(0L) }
     var copying by remember { mutableStateOf(false) }
     var nameClash by remember { mutableStateOf<NameClash?>(null) }
+    var removing by remember { mutableStateOf<LinuxProgram?>(null) }
+    var deleting by remember { mutableStateOf(false) }
+    val unused = remember(tick) { unusedCopies(container, programs) }
+
+    /** Deleting a game's files can take a while (tens of GB), so it runs on its own thread. */
+    fun deleteFolders(folders: List<File>) {
+        deleting = true
+        Thread {
+            folders.forEach { FileUtils.delete(it) }
+            main.post {
+                deleting = false
+                tick++
+            }
+        }.start()
+    }
 
     /** Adds the shortcut, or asks for another name when this one is taken: two games can share an executable's name. */
     fun addProgram(name: String, path: String) {
@@ -265,7 +297,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             }
         }
     ) { padding ->
-        if (programs.isEmpty()) {
+        if (programs.isEmpty() && unused.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("No programs yet. Use + to add one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -293,9 +325,13 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            IconButton(onClick = {
-                                program.file.delete()
-                                tick++
+                            // The container's own Steam shortcut goes with the container, not by hand.
+                            if (!LinuxSession.isSteam(program.path)) IconButton(onClick = {
+                                if (copiedFolder(container, program.path) != null) removing = program
+                                else {
+                                    program.file.delete()
+                                    tick++
+                                }
                             }) { Icon(Icons.Outlined.DeleteOutline, "Remove") }
                             Surface(
                                 onClick = { start(program) },
@@ -304,6 +340,30 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Start") } }
+                        }
+                    }
+                }
+                items(unused, key = { "unused:" + it.path }) { folder ->
+                    Surface(
+                        Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 1.dp
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Copied files without a program", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    "programs/${folder.name}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(enabled = !deleting, onClick = { deleteFolders(listOf(folder)) }) {
+                                Icon(Icons.Outlined.DeleteOutline, "Delete the files")
+                            }
                         }
                     }
                 }
@@ -363,6 +423,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 } catch (e: Exception) {
                     ok = false
                 }
+                if (!ok) FileUtils.delete(target)
                 main.post {
                     copying = false
                     if (ok) {
@@ -394,6 +455,48 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 }
             },
             dismissButton = { TextButton(onClick = { pendingCopy = null }) { Text("Cancel") } }
+        )
+    }
+
+    removing?.let { program ->
+        val folder = copiedFolder(container, program.path)
+        // Another shortcut may start from the same copy (a game with two executables): its files stay while one is left.
+        val shared = programs.any { it.file != program.file && copiedFolder(container, it.path)?.name == folder?.name }
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove \"${program.name}\"?") },
+            text = {
+                Text(
+                    if (shared) "Another program uses the same copied files, so they stay."
+                    else "Its files were copied into this container (programs/${folder?.name}). Delete them too?"
+                )
+            },
+            confirmButton = {
+                Row {
+                    if (!shared && folder != null) {
+                        TextButton(onClick = {
+                            removing = null
+                            program.file.delete()
+                            deleteFolders(listOf(folder))
+                        }) { Text("Remove and delete files") }
+                    }
+                    TextButton(onClick = {
+                        removing = null
+                        program.file.delete()
+                        tick++
+                    }) { Text(if (shared) "Remove" else "Keep files") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Deleting…") },
+            text = { LinearProgressIndicator(Modifier.fillMaxWidth()) },
+            confirmButton = {}
         )
     }
 

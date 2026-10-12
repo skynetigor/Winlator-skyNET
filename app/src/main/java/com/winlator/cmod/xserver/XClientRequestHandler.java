@@ -11,6 +11,7 @@ import com.winlator.cmod.xserver.errors.BadImplementation;
 import com.winlator.cmod.xserver.errors.XRequestError;
 import com.winlator.cmod.xserver.extensions.Extension;
 import com.winlator.cmod.xserver.requests.AtomRequests;
+import com.winlator.cmod.xserver.requests.ColorRequests;
 import com.winlator.cmod.xserver.requests.CursorRequests;
 import com.winlator.cmod.xserver.requests.DrawRequests;
 import com.winlator.cmod.xserver.requests.ExtensionRequests;
@@ -507,6 +508,12 @@ public class XClientRequestHandler implements RequestHandler {
                         outputStream.writeSuccessReply(client.getSequenceNumber(), 0);
                         Log.d("XClientRequestHandler", "X_UngrabServer request handled successfully:" + outputStream.buffer.position());
                     }
+                    break;
+                case 84: // AllocColor
+                    ColorRequests.allocColor(client, inputStream, outputStream);
+                    break;
+                case 85: // AllocNamedColor
+                    ColorRequests.allocNamedColor(client, inputStream, outputStream);
                     break;
                 case 32: // UngrabKeyboard: no keyboard grabs are kept, so nothing to release
                     client.skipRequest();

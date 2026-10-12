@@ -108,6 +108,11 @@ public class GameDetailFragment extends Fragment {
 
                     @Override
                     public void onRemove() {
+                        if (shortcut.isContainerOwned()) {
+                            android.widget.Toast.makeText(requireContext(),
+                                    "This shortcut is removed with its container.", android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
                         ContentDialog.confirm(requireContext(), R.string.do_you_want_to_remove_this_shortcut, () -> {
                             if (shortcut.file.delete()) getParentFragmentManager().popBackStack();
                         });

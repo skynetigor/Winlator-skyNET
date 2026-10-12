@@ -15,6 +15,11 @@ import com.winlator.cmod.ui.theme.WinZTheme
 object ShortcutSettingsComposeDialog {
     @JvmStatic
     fun show(fragment: Fragment, shortcut: Shortcut) {
+        if (shortcut.isContainerOwned()) {
+            android.widget.Toast.makeText(fragment.requireContext(),
+                "This shortcut belongs to the container and cannot be changed.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         val dialog = ComponentDialog(fragment.requireContext())
         dialog.show()
         dialog.window?.apply {

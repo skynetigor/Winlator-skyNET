@@ -200,6 +200,23 @@ public class ContainerManager {
         return file;
     }
 
+    public static final String STEAM_SHORTCUT = "Steam";
+
+    /**
+     * A Linux container that starts the Steam client has a shortcut for it that only the container owns: the shortcut
+     * is written here and removed with the container (or when the option is turned off), never by the user.
+     */
+    public static void syncSteamShortcut(Container container, boolean enabled) {
+        File file = linuxShortcutFile(container, STEAM_SHORTCUT);
+        if (!enabled) {
+            if (file.exists() && file.delete()) Log.d("ContainerManager", "Removed the Steam shortcut");
+            return;
+        }
+        file.getParentFile().mkdirs();
+        FileUtils.writeString(file, "[Desktop Entry]\nName=" + STEAM_SHORTCUT + "\nExec=" + com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM
+                + "\nType=Application\ncontainer_id:" + container.id + "\n");
+    }
+
     public void duplicateContainerAsync(Container container, Runnable callback) {
         final Handler handler = new Handler();
         Executors.newSingleThreadExecutor().execute(() -> {

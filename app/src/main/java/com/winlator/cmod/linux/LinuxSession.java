@@ -98,6 +98,7 @@ public final class LinuxSession {
 
     /** As above, with the shortcut's launch options (see {@link LinuxLaunchOptions}): its variables, wrapper and arguments. */
     public static String[] programCommand(Context context, Container container, String path, String launchOptions) {
+        if (isSteam(path)) return steamCommand();
         LinuxLaunchOptions options = LinuxLaunchOptions.parse(launchOptions);
         String emulatorPath = "";
         int machine = elfMachine(hostFile(context, container, path));
@@ -123,8 +124,7 @@ public final class LinuxSession {
         // through it, the program; the wrapper (taskset, ...) starts the emulator.
         List<String> command = new ArrayList<>(java.util.Arrays.asList(
                 "/bin/bash", "-c",
-                (steamEnabled(container) ? STEAM_START : "")
-                        + "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" || exit 1; "
+                "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" || exit 1; "
                         + "prog=\"$1\"; emu=\"$2\"; nenv=\"$3\"; nwrap=\"$4\"; shift 4; "
                         + "envs=(\"${@:1:$nenv}\"); shift \"$nenv\"; wrap=(\"${@:1:$nwrap}\"); shift \"$nwrap\"; "
                         + "case \"$prog\" in *.sh) exec env \"${envs[@]}\" \"${wrap[@]}\" bash \"$prog\" \"$@\";; "
@@ -138,27 +138,35 @@ public final class LinuxSession {
         return command.toArray(new String[0]);
     }
 
-    public static boolean steamEnabled(Container container) {
-        return "1".equals(container.getExtra(EXTRA_STEAM));
+    /** The program of a container's Steam shortcut: not a file, the runtime's Steam client. */
+    public static final String STEAM_PROGRAM = "steam://client";
+
+    public static boolean isSteam(String path) {
+        return STEAM_PROGRAM.equals(path);
     }
 
     /**
-     * Starts the runtime's native arm64 Steam client beside the program, on the container's own display (no gamescope).
-     * The first run downloads the client (bannerlator-steam-install), so all of it happens in the background; the
-     * client's output goes to Winlator/logs/linux-steam.log on shared storage. Files a killed session left behind are cleared first, as the runtime's
-     * own session does.
+     * Runs the runtime's native arm64 Steam client on the container's own display (no gamescope). The first run
+     * downloads the client (bannerlator-steam-install); its output goes to Winlator/logs/linux-steam.log on shared
+     * storage. Files a killed session left behind are cleared first, as the runtime's own session does.
      */
-    private static final String STEAM_START =
-            "( export XDG_DATA_HOME=\"${XDG_DATA_HOME:-$HOME/.local/share}\"; steam_root=\"$XDG_DATA_HOME/Steam\"; "
-                    + "mkdir -p /storage/emulated/0/Winlator/logs; exec >/storage/emulated/0/Winlator/logs/linux-steam.log 2>&1; "
-                    + "echo \"== steam start $(date) uid=$(id -u) home=$HOME\"; command -v bannerlator-steam-install curl unzip pgrep; "
-                    + "bannerlator-steam-install || exit 1; "
-                    + "if ! pgrep -f 'steamwebhelper|steamrtarm64/steam' >/dev/null 2>&1; then "
-                    + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; fi; "
-                    + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
-                    + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
-                    + "exec \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox -cef-force-gpu "
-                    + "-cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan ) & ";
+    private static String[] steamCommand() {
+        return new String[]{"/bin/bash", "-c",
+                "export XDG_DATA_HOME=\"${XDG_DATA_HOME:-$HOME/.local/share}\"; steam_root=\"$XDG_DATA_HOME/Steam\"; "
+                        + "mkdir -p /storage/emulated/0/Winlator/logs; exec >/storage/emulated/0/Winlator/logs/linux-steam.log 2>&1; "
+                        + "echo \"== steam start $(date) uid=$(id -u) home=$HOME\"; "
+                        // The runtime ships gawk (what awk links to) without the execute bit, and the installer needs awk.
+                        + "chmod 755 /usr/bin/gawk; "
+                        + "bannerlator-steam-install || exit 1; "
+                        + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; "
+                        + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
+                        + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
+                        // The client exits with 42 after updating itself and wants a fresh start; an update that cannot
+                        // install asks again every time, so the restarts are capped.
+                        + "for try in 1 2 3 4; do \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox "
+                        + "-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11; code=$?; "
+                        + "[ \"$code\" = 42 ] || break; done; exit $code"};
+    }
 
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {

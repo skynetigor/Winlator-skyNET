@@ -262,6 +262,11 @@ public class Shortcut {
         }
     }
 
+    /** A shortcut the container owns (the Steam client of a Linux container): no editing, no removal. */
+    public boolean isContainerOwned() {
+        return container.isLinux() && com.winlator.cmod.linux.LinuxSession.isSteam(path);
+    }
+
     public int getContainerId() {
         return container.id;
     }

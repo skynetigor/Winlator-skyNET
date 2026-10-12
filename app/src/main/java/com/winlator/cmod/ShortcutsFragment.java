@@ -698,6 +698,9 @@ public class ShortcutsFragment extends Fragment {
         else if (LibraryComposeHost.ACTION_SETTINGS.equals(action)) {
             ShortcutSettingsComposeDialog.show(this, shortcut);
         }
+        else if (shortcut.isContainerOwned() && !LibraryComposeHost.ACTION_FAVORITE.equals(action)) {
+            Toast.makeText(context, "This shortcut belongs to the container and cannot be changed.", Toast.LENGTH_SHORT).show();
+        }
         else if (LibraryComposeHost.ACTION_ICON.equals(action)) {
             shortcutForIconUpdate = shortcut;
             iconPickerLauncher.launch("image/*");

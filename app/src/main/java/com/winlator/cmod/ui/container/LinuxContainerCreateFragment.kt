@@ -314,6 +314,7 @@ private fun LinuxContainerEditor(
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
         container.putExtra("graphicsFilterMode", upscaler)
+        ContainerManager.syncSteamShortcut(container, startSteam)
     }
 
     fun save() {
