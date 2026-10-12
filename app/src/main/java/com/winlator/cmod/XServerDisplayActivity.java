@@ -468,6 +468,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
+        // A Linux shortcut's own frame generation settings win over its container's for this session.
+        LsfgManager.endSession();
+        if (shortcut != null && container.isLinux()) {
+            String shortcutMultiplier = shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER);
+            String shortcutFlow = shortcut.getExtra(LsfgManager.EXTRA_FLOW_SCALE);
+            try {
+                LsfgManager.beginSession(
+                        shortcutMultiplier.isEmpty() ? null : Integer.valueOf(shortcutMultiplier),
+                        shortcutFlow.isEmpty() ? null : Float.valueOf(shortcutFlow));
+            } catch (NumberFormatException ignored) {}
+        }
 
         taskAffinityMask = (short) ProcessHelper.getAffinityMask(container.getCPUList(true));
         taskAffinityMaskWoW64 = (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
@@ -598,6 +609,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         displayxConfig.put("presentRR", presentRR ? "1" : "0");
         displayxConfig.put("backPressure", backPressure ? "1" : "0");
         displayxConfig.put("precisePresentation", precisePresentation ? "1" : "0");
+        if ("native".equals(screenSize.trim())) screenSize = nativeScreenSize();
         xServer = new XServer(new ScreenInfo(screenSize), useDisplayX ? "displayx" : "egl", displayxConfig);
         xServer.setWinHandler(winHandler);
         if (linuxSession) {
@@ -1060,6 +1072,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
         LsfgManager.stopVsyncClock();
+        LsfgManager.endSession();
         super.onDestroy();
     }
 
@@ -2207,6 +2220,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
 
         String savedFilter = container != null ? container.getExtra("graphicsFilterMode") : "";
+        if (shortcut != null && linuxSession && !shortcut.getExtra("graphicsFilterMode").isEmpty())
+            savedFilter = shortcut.getExtra("graphicsFilterMode");
         boolean fsrOn = !savedFilter.isEmpty() && Integer.parseInt(savedFilter) > 0;
         if (swEnableFSR != null) {
             swEnableFSR.setChecked(fsrOn);
@@ -2265,9 +2280,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (llFrameGenOptions != null) llFrameGenOptions.setVisibility(View.VISIBLE);
         if (tvFrameGenHint  != null) {
             tvFrameGenHint.setVisibility(lsfgArmed ? View.GONE : View.VISIBLE);
-            if (tvFrameGenHint instanceof TextView) ((TextView) tvFrameGenHint).setText(container != null && LsfgManager.getMultiplier(container) >= 2
-                    ? "Import Lossless.dll in Settings > Components > Frame Generation, then relaunch."
-                    : "Choose a frame generation multiplier in the container settings and relaunch.");
+            if (tvFrameGenHint instanceof TextView)
+                ((TextView) tvFrameGenHint).setText("Import Lossless.dll in Settings > Components > Frame Generation, then relaunch.");
         }
         if (spFrameGenFPS   != null) spFrameGenFPS.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
         if (lblFrameGenFlow != null) lblFrameGenFlow.setVisibility(lsfgArmed ? View.VISIBLE : View.GONE);
@@ -2284,14 +2298,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             fgSpinner.setAdapter(a);
 
             int currentMultiplier = LsfgManager.getMultiplier(container);
-            int selected = 1;
+            int selected = 0;
             for (int i = 0; i < fgMultipliers.length; i++) if (fgMultipliers[i] == currentMultiplier) selected = i;
             fgSpinner.setSelection(selected, false);
 
             fgSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
                 @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
                     float flow = fgFlow != null ? fgFlow.getValue() : LsfgManager.getFlowScale(XServerDisplayActivity.this, container);
-                    LsfgManager.applyRuntimeConfig(XServerDisplayActivity.this, container, fgMultipliers[pos], flow);
+                    applyFrameGeneration(fgMultipliers[pos], flow);
                 }
                 @Override public void onNothingSelected(AdapterView<?> p) {}
             });
@@ -2306,13 +2320,33 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (!isFinal) return;
                     int pos = fgSpinner.getSelectedItemPosition();
                     int mul = (pos >= 0 && pos < fgMultipliers.length) ? fgMultipliers[pos] : LsfgManager.getMultiplier(container);
-                    LsfgManager.applyRuntimeConfig(this, container, mul, value);
+                    applyFrameGeneration(mul, value);
                 });
             }
         }
     }
 
-        private void setupSidebarInputControls() {
+    /** The device's display in pixels, wide side first, as "WxH": what a container whose size is "native" renders at. */
+    private String nativeScreenSize() {
+        android.graphics.Rect bounds = getWindowManager().getMaximumWindowMetrics().getBounds();
+        int width = Math.max(bounds.width(), bounds.height());
+        int height = Math.min(bounds.width(), bounds.height());
+        return width + "x" + height;
+    }
+
+    /** A change from the sidebar: kept on the shortcut when the shortcut has its own frame generation, else on the container. */
+    private void applyFrameGeneration(int multiplier, float flowScale) {
+        boolean ownSettings = shortcut != null && container.isLinux()
+                && !shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER).isEmpty();
+        if (ownSettings) {
+            if (multiplier >= 2) shortcut.putExtra(LsfgManager.EXTRA_MULTIPLIER, String.valueOf(multiplier));
+            shortcut.putExtra(LsfgManager.EXTRA_FLOW_SCALE, String.format(java.util.Locale.US, "%.2f", flowScale));
+            shortcut.saveData();
+        }
+        LsfgManager.applyRuntimeConfig(this, container, multiplier, flowScale, !ownSettings);
+    }
+
+    private void setupSidebarInputControls() {
         if (inputControlsView == null || inputControlsManager == null) return;
 
         Spinner spInputControlsProfile = findViewById(R.id.SPInputControlsProfile);

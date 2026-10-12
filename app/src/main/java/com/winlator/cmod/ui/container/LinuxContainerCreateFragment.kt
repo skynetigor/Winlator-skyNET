@@ -151,37 +151,8 @@ private class RuntimeInstallUi {
     var finishedTick by mutableIntStateOf(0)
 }
 
-private val SIZE_PATTERN = Regex("^\\d{3,5}x\\d{3,5}$")
-
-/** The screen sizes offered, smallest first; "Custom" after them asks for a width and a height. */
-private val RESOLUTION_PRESETS = listOf(
-    "640x360" to "640x360 (16:9)",
-    "780x360" to "780x360 (19.5:9)",
-    "640x480" to "640x480 (4:3)",
-    "800x600" to "800x600 (4:3)",
-    "854x480" to "854x480 (16:9)",
-    "960x544" to "960x544 (16:9)",
-    "1024x768" to "1024x768 (4:3)",
-    "1280x576" to "1280x576 (20:9)",
-    "1280x720" to "1280x720 (16:9)",
-    "1280x800" to "1280x800 (16:10)",
-    "1280x960" to "1280x960 (4:3)",
-    "1280x1024" to "1280x1024 (5:4)",
-    "1366x768" to "1366x768 (16:9)",
-    "1440x900" to "1440x900 (16:10)",
-    "1600x720" to "1600x720 (20:9)",
-    "1600x900" to "1600x900 (16:9)",
-    "1600x1200" to "1600x1200 (4:3)",
-    "1920x1080" to "1920x1080 (16:9)",
-    "1920x1200" to "1920x1200 (16:10)",
-    "2560x1440" to "2560x1440 (16:9)"
-)
-private const val CUSTOM_RESOLUTION = "custom"
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
 private val HUD_LABELS = listOf("Off", "Classic", "Modern")
-
-// The renderer's filter modes (see the sidebar): 0 is a plain scale, 2 SGSR (Qualcomm), 3 FSR 1, 4 Lanczos 2.
-private val UPSCALER_MODES = listOf("0" to "Off (plain scaling)", "2" to "SGSR (Qualcomm)", "3" to "FSR 1", "4" to "Lanczos 2")
 
 @Composable
 private fun SectionTitle(text: String) {
@@ -208,10 +179,6 @@ private fun LinuxContainerEditor(
 
     var name by remember { mutableStateOf(editing?.name ?: "Linux") }
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
-    // A size that is not in the list opens as Custom, with its width and height in two fields.
-    var customResolution by rememberSaveable { mutableStateOf(RESOLUTION_PRESETS.none { it.first == screenSize.trim() }) }
-    var widthText by rememberSaveable { mutableStateOf(screenSize.trim().substringBefore('x', "")) }
-    var heightText by rememberSaveable { mutableStateOf(screenSize.trim().substringAfter('x', "")) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: LinuxEmulator.NONE) }
@@ -230,7 +197,8 @@ private fun LinuxContainerEditor(
         mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
     }
     var softwareOutput by remember {
-        mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) != "native")
+        // New containers start with native (dma-buf) output; the CPU copy halves GPU load.
+        mutableStateOf(editing != null && editing.getExtra(LinuxSession.EXTRA_VULKAN_PRESENT) != "native")
     }
     val cpuSelected = remember {
         mutableStateListOf<Boolean>().apply {
@@ -269,7 +237,7 @@ private fun LinuxContainerEditor(
     val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // Until the user picks one, the first installed runtime is used.
     val selected = runtimes.firstOrNull { it.id == chosenRuntimeId } ?: runtimes.firstOrNull()
-    val sizeValid = SIZE_PATTERN.matches(screenSize.trim())
+    val sizeValid = isValidScreenSize(screenSize.trim())
     val needsDownload = editing == null && selected == null
     val freeBytes = context.filesDir.usableSpace
     val neededBytes = offered?.let { LinuxRuntimeInstaller.requiredBytes(it) } ?: 0L
@@ -524,67 +492,7 @@ private fun LinuxContainerEditor(
             !sizeValid
         ) {
             SettingsCard {
-                val resolutionEntries = LinkedHashMap<String, String>().apply {
-                    RESOLUTION_PRESETS.forEach { put(it.first, it.second) }
-                    put(CUSTOM_RESOLUTION, "Custom")
-                }
-                SettingMappedChoice(
-                    "Resolution",
-                    if (customResolution) CUSTOM_RESOLUTION else screenSize.trim(),
-                    resolutionEntries
-                ) { choice ->
-                    if (choice == CUSTOM_RESOLUTION) {
-                        // Start from the size that is set now.
-                        val current = screenSize.trim()
-                        widthText = current.substringBefore('x', widthText)
-                        heightText = current.substringAfter('x', heightText)
-                        customResolution = true
-                    } else {
-                        customResolution = false
-                        screenSize = choice
-                    }
-                }
-                if (customResolution) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = widthText,
-                            onValueChange = { value ->
-                                widthText = value.filter { it.isDigit() }.take(5)
-                                screenSize = "${widthText}x$heightText"
-                            },
-                            label = { Text("Width") },
-                            isError = !sizeValid,
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("×", style = MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(
-                            value = heightText,
-                            onValueChange = { value ->
-                                heightText = value.filter { it.isDigit() }.take(5)
-                                screenSize = "${widthText}x$heightText"
-                            },
-                            label = { Text("Height") },
-                            isError = !sizeValid,
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    if (!sizeValid) {
-                        Text(
-                            "A width and a height of 3 to 5 digits, for example 1280 and 720.",
-                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
+                ResolutionSetting(screenSize) { screenSize = it }
                 SettingsDivider()
                 SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
                 SettingsDivider()
@@ -683,120 +591,10 @@ private fun LinuxContainerEditor(
             )
         }
     ) { padding ->
-        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
-            if (maxWidth >= WIDE_LAYOUT_WIDTH) {
-                // Categories on the left, the chosen one's settings on the right.
-                var chosen by rememberSaveable { mutableStateOf(categories.firstOrNull { it.attention }?.id ?: "general") }
-                val page = categories.firstOrNull { it.id == chosen } ?: categories.first()
-                Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.width(280.dp).fillMaxHeight().padding(12.dp)) {
-                        Column(
-                            Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            categories.forEach { category ->
-                                CategoryRow(category, selected = category.id == chosen) { chosen = category.id }
-                            }
-                        }
-                        Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            problems()
-                            saveButton()
-                        }
-                    }
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(page.title, style = MaterialTheme.typography.titleLarge)
-                        page.content()
-                    }
-                }
-            } else {
-                // Sections that open and close.
-                Column(
-                    Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    categories.forEach { category -> CollapsibleSection(category) }
-                    problems()
-                    saveButton()
-                }
-            }
-        }
-    }
-}
-
-/** One group of the editor: its name, a line saying how it is set, and its page. */
-private class EditorCategory(
-    val id: String,
-    val title: String,
-    val summary: String,
-    val attention: Boolean,
-    val content: @Composable () -> Unit
-)
-
-private val WIDE_LAYOUT_WIDTH = 720.dp
-
-@Composable
-private fun CategoryRow(category: EditorCategory, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Text(
-                category.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                category.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2
-            )
-        }
-    }
-}
-
-@Composable
-private fun CollapsibleSection(category: EditorCategory) {
-    var expanded by rememberSaveable(category.id) { mutableStateOf(category.attention) }
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            Surface(onClick = { expanded = !expanded }, color = MaterialTheme.colorScheme.surface) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            category.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            category.summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2
-                        )
-                    }
-                    Icon(if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null)
-                }
-            }
-            if (expanded) {
-                Column(
-                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) { category.content() }
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            GroupedSettings(categories) {
+                problems()
+                saveButton()
             }
         }
     }

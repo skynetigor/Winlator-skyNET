@@ -134,8 +134,26 @@ public final class LsfgManager {
 
     // ---- Container settings ------------------------------------------------
 
+    // A shortcut may carry its own multiplier and flow scale; they apply to the session that was started from it
+    // (set when it starts, cleared when it ends) and win over the container's.
+    private static volatile Integer sessionMultiplier;
+    private static volatile Float sessionFlowScale;
+
+    /** @param multiplier the shortcut's multiplier, or null to follow the container; @param flowScale likewise */
+    public static void beginSession(Integer multiplier, Float flowScale) {
+        sessionMultiplier = multiplier;
+        sessionFlowScale = flowScale == null ? null : clampFlowScale(flowScale);
+    }
+
+    public static void endSession() {
+        sessionMultiplier = null;
+        sessionFlowScale = null;
+    }
+
     /** 0 ({@link #MULTIPLIER_OFF}) or 2..4. There is no separate enable switch. */
     public static int getMultiplier(Container container) {
+        Integer session = sessionMultiplier;
+        if (session != null) return session < 2 ? MULTIPLIER_OFF : Math.min(4, session);
         migrateLegacySwitch(container);
         try {
             int value = Integer.parseInt(container.getExtra(EXTRA_MULTIPLIER, String.valueOf(DEFAULT_MULTIPLIER)));
@@ -164,6 +182,8 @@ public final class LsfgManager {
 
     /** Effective flow scale: the container's override, else the app-wide default. */
     public static float getFlowScale(Context context, Container container) {
+        Float session = sessionFlowScale;
+        if (session != null) return session;
         Float override = getFlowScaleOverride(container);
         return override != null ? override : getDefaultFlowScale(context);
     }
@@ -229,9 +249,13 @@ public final class LsfgManager {
         return dll.isFile() && dll.length() > 0;
     }
 
-    /** Frame generation runs only when the container has a multiplier and a Lossless.dll was imported. */
+    /**
+     * The layer is loaded whenever a Lossless.dll was imported, whatever the multiplier: with "Off" it passes frames
+     * through, and the in-game sidebar can turn frame generation on, which cannot be done once the game has started
+     * without the layer.
+     */
     public static boolean isArmed(Context context, Container container) {
-        return getMultiplier(container) >= 2 && hasDll(context);
+        return hasDll(context);
     }
 
     /**
@@ -502,9 +526,19 @@ public final class LsfgManager {
      * scale is stored as the container's own override.
      */
     public static void applyRuntimeConfig(Context context, Container container, int multiplier, float flowScale) {
+        applyRuntimeConfig(context, container, multiplier, flowScale, true);
+    }
+
+    /** @param persist false when the values belong to a shortcut: the caller saves them there, the container keeps its own */
+    public static void applyRuntimeConfig(Context context, Container container, int multiplier, float flowScale, boolean persist) {
         final int m = Math.max(RUNTIME_OFF_MULTIPLIER, Math.min(4, multiplier));
-        setFlowScale(container, flowScale);
-        if (m >= 2) setMultiplier(container, m);
+        if (persist) {
+            setFlowScale(container, flowScale);
+            if (m >= 2) setMultiplier(container, m);
+        } else {
+            sessionMultiplier = m;
+            sessionFlowScale = clampFlowScale(flowScale);
+        }
         final Context appContext = context.getApplicationContext();
         runtimeWriter.execute(() -> writeConfig(appContext, container, m));
     }
