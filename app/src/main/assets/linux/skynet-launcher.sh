@@ -24,4 +24,9 @@ done
 } >> "$log" 2>&1
 # the Steam runtime's overlay libraries are not there; Steam's own preload would only produce warnings
 unset LD_PRELOAD
+# the client draws in software; the game gets the container's OpenGL driver (Zink on Turnip) back
+if [ "$SKY_GAME_GL" = zink ]; then
+    export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
+    unset LIBGL_ALWAYS_SOFTWARE
+fi
 exec "${cmd[@]}" >> "$log" 2>&1

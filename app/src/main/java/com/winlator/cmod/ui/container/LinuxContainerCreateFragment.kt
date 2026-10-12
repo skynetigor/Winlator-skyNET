@@ -199,7 +199,8 @@ private fun LinuxContainerEditor(
     var steamBigPicture by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM_BIG_PICTURE) == "1") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var glDriver by remember {
-        mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
+        // OpenGL 4.6 on the Adreno through Zink (over Turnip) works; new containers use it, and one without a choice keeps llvmpipe.
+        mutableStateOf(if (editing == null || editing.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
     }
     var softwareOutput by remember {
         // New containers start with native (dma-buf) output; the CPU copy halves GPU load.
@@ -542,7 +543,7 @@ private fun LinuxContainerEditor(
                 SettingMappedChoice(
                     "OpenGL driver",
                     glDriver,
-                    linkedMapOf("software" to "Software (llvmpipe)", "zink" to "Zink on Turnip (experimental, not working yet)")
+                    linkedMapOf("zink" to "Zink on Turnip (OpenGL 4.6 over Vulkan, accelerated)", "software" to "Software (llvmpipe, CPU)")
                 ) { glDriver = it }
                 SettingsDivider()
                 SettingMappedChoice(

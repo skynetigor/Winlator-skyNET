@@ -208,6 +208,13 @@ public final class LinuxSession {
                         + "( while sleep 10; do mkdir -p /storage/emulated/0/Winlator/logs/steam-logs; "
                         + "cp -r \"$steam_root/logs/.\" /storage/emulated/0/Winlator/logs/steam-logs/ 2>/dev/null; done ) & "
                         + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; "
+                        // The client works around a bug of old libXrandr by looking its functions up behind its own; with RandR 1.3 offered
+                        // it asks for XRRGetOutputInfo, finds nothing (the library is not loaded yet) and crashes. Loading it first fixes that.
+                        // The client's web helper (Chromium) draws in software; Zink would break it. The games it starts get
+                        // Zink back from the launcher (SKY_GAME_GL).
+                        + "if [ \"$GALLIUM_DRIVER\" = zink ]; then export SKY_GAME_GL=zink LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe; "
+                        + "unset MESA_LOADER_DRIVER_OVERRIDE; fi; "
+                        + "[ -f /usr/lib/libXrandr.so.2 ] && export LD_PRELOAD=\"/usr/lib/libXrandr.so.2${LD_PRELOAD:+:$LD_PRELOAD}\"; "
                         + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
                         + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
                         // The client exits with 42 after updating itself and wants a fresh start; an update that cannot

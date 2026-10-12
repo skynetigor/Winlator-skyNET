@@ -622,7 +622,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // screen takes its size, and the picture is scaled to the display as before.
             com.winlator.cmod.xserver.extensions.RandrExtension randr =
                     xServer.getExtension(com.winlator.cmod.xserver.extensions.RandrExtension.MAJOR_OPCODE);
-            randr.setModesEnabled(true);
+            // (A file Winlator/no-randr-modes on shared storage turns the modes off: for finding out what a RandR 1.3 breaks.)
+            randr.setModesEnabled(!new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/no-randr-modes").exists());
         }
         xServer.setWinHandler(winHandler);
         if (linuxSession) {
