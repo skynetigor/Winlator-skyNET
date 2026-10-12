@@ -1398,7 +1398,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new PulseAudioComponent(
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.PULSE_SERVER_PATH), false));
 
-        String[] command = LinuxSession.programCommand(this, container, shortcut.path);
+        String[] command = LinuxSession.programCommand(this, container, shortcut.path,
+                shortcut.getExtra(com.winlator.cmod.linux.LinuxLaunchOptions.EXTRA));
         LinuxProgramLauncherComponent launcher = new LinuxProgramLauncherComponent(container, linuxRuntime, command);
         // The output reader runs on its own thread: a moment is left for the last lines (which say how the
         // program ended) to arrive before the result is read from them.

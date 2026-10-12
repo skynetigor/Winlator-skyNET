@@ -33,7 +33,13 @@ object ShortcutSettingsComposeDialog {
             decorView.systemUiVisibility = immersiveUiFlagsV2()
         }
         dialog.setContentView(ComposeView(fragment.requireContext()).apply {
-            setContent { WinZTheme { ShortcutEditorV2(fragment, shortcut, dialog::dismiss) } }
+            // A Linux program has no Wine settings to edit: its own page, with the launch options.
+            setContent {
+                WinZTheme {
+                    if (shortcut.container.isLinux) LinuxShortcutEditor(shortcut, dialog::dismiss)
+                    else ShortcutEditorV2(fragment, shortcut, dialog::dismiss)
+                }
+            }
         })
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }

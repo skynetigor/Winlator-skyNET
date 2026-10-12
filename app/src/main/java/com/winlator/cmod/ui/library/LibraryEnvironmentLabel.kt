@@ -9,6 +9,7 @@ import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.container.Shortcut
 import com.winlator.cmod.contents.ContentsManager
 import com.winlator.cmod.core.WineInfo
+import com.winlator.cmod.linux.LinuxContainerInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,6 +21,8 @@ private fun environmentText(
     shortcuts: Map<String, Shortcut>
 ): String = runCatching {
     val shortcut = shortcuts[shortcutPath] ?: return@runCatching fallback
+    // A Linux container has no Wine: name the system, the x86 emulator it uses (if any) and the output.
+    if (shortcut.container.isLinux) return@runCatching LinuxContainerInfo.summary(context, shortcut.container, " · ")
     val info = WineInfo.fromIdentifier(context, contents, shortcut.container.getWineVersion())
     var version = info.fullVersion()
     if (version.endsWith(".0")) version = version.dropLast(2)

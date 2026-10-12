@@ -119,6 +119,9 @@ public class GameDetailFragment extends Fragment {
     }
 
     private String buildEnvironmentSubtitle() {
+        if (shortcut.container.isLinux()) {
+            return com.winlator.cmod.linux.LinuxContainerInfo.summary(requireContext(), shortcut.container, "  \u2022  ");
+        }
         String runtime = shortcut.container.getWineVersion();
         try {
             ContentsManager contents = new ContentsManager(requireContext());

@@ -6,6 +6,21 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import com.winlator.cmod.lsfg.LsfgManager
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,7 +60,10 @@ import com.winlator.cmod.core.GPUInformation
 import com.winlator.cmod.box64.Box64Preset
 import com.winlator.cmod.box64.Box64PresetManager
 import com.winlator.cmod.linux.LinuxDriverManager
+import com.winlator.cmod.fexcore.FEXCorePreset
+import com.winlator.cmod.fexcore.FEXCorePresetManager
 import com.winlator.cmod.linux.LinuxEmulator
+import com.winlator.cmod.linux.LinuxRootfs
 import com.winlator.cmod.linux.LinuxRuntime
 import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
@@ -134,6 +152,31 @@ private class RuntimeInstallUi {
 }
 
 private val SIZE_PATTERN = Regex("^\\d{3,5}x\\d{3,5}$")
+
+/** The screen sizes offered, smallest first; "Custom" after them asks for a width and a height. */
+private val RESOLUTION_PRESETS = listOf(
+    "640x360" to "640x360 (16:9)",
+    "780x360" to "780x360 (19.5:9)",
+    "640x480" to "640x480 (4:3)",
+    "800x600" to "800x600 (4:3)",
+    "854x480" to "854x480 (16:9)",
+    "960x544" to "960x544 (16:9)",
+    "1024x768" to "1024x768 (4:3)",
+    "1280x576" to "1280x576 (20:9)",
+    "1280x720" to "1280x720 (16:9)",
+    "1280x800" to "1280x800 (16:10)",
+    "1280x960" to "1280x960 (4:3)",
+    "1280x1024" to "1280x1024 (5:4)",
+    "1366x768" to "1366x768 (16:9)",
+    "1440x900" to "1440x900 (16:10)",
+    "1600x720" to "1600x720 (20:9)",
+    "1600x900" to "1600x900 (16:9)",
+    "1600x1200" to "1600x1200 (4:3)",
+    "1920x1080" to "1920x1080 (16:9)",
+    "1920x1200" to "1920x1200 (16:10)",
+    "2560x1440" to "2560x1440 (16:9)"
+)
+private const val CUSTOM_RESOLUTION = "custom"
 private val FPS_LABELS = listOf("Off", "30 FPS", "60 FPS", "90 FPS", "120 FPS")
 private val HUD_LABELS = listOf("Off", "Classic", "Modern")
 
@@ -165,6 +208,10 @@ private fun LinuxContainerEditor(
 
     var name by remember { mutableStateOf(editing?.name ?: "Linux") }
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
+    // A size that is not in the list opens as Custom, with its width and height in two fields.
+    var customResolution by rememberSaveable { mutableStateOf(RESOLUTION_PRESETS.none { it.first == screenSize.trim() }) }
+    var widthText by rememberSaveable { mutableStateOf(screenSize.trim().substringBefore('x', "")) }
+    var heightText by rememberSaveable { mutableStateOf(screenSize.trim().substringAfter('x', "")) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
     var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
     var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: LinuxEmulator.NONE) }
@@ -172,6 +219,13 @@ private fun LinuxContainerEditor(
     var emulatorPreset by remember {
         mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_PRESET)?.takeIf { it.isNotEmpty() } ?: Box64Preset.COMPATIBILITY)
     }
+    // FEX only: the root filesystem it runs in, its own preset, and whether the guest's Vulkan/OpenGL go to the runtime's.
+    var rootfsId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ROOTFS) ?: "") }
+    var fexPreset by remember {
+        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_PRESET)?.takeIf { it.isNotEmpty() } ?: FEXCorePreset.INTERMEDIATE)
+    }
+    var startSteam by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM) == "1") }
+    var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var glDriver by remember {
         mutableStateOf(if (editing?.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
     }
@@ -209,7 +263,10 @@ private fun LinuxContainerEditor(
     val runtimes = remember(refreshTick, install.finishedTick) { LinuxRuntime.listInstalled(context) }
     val drivers = remember(refreshTick) { LinuxDriverManager.list(context) }
     val boxBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.BOX64) }
+    val fexBuilds = remember(refreshTick) { LinuxEmulator.list(context, LinuxEmulator.FEX) }
+    val rootfsList = remember(refreshTick) { LinuxRootfs.list(context) }
     val boxPresets = remember { Box64PresetManager.getPresets("box64", context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
+    val fexPresets = remember { FEXCorePresetManager.getPresets(context).associateTo(LinkedHashMap<String, String>()) { it.id to it.name } }
     // Until the user picks one, the first installed runtime is used.
     val selected = runtimes.firstOrNull { it.id == chosenRuntimeId } ?: runtimes.firstOrNull()
     val sizeValid = SIZE_PATTERN.matches(screenSize.trim())
@@ -246,8 +303,14 @@ private fun LinuxContainerEditor(
         container.putExtra(LinuxSession.EXTRA_GL_DRIVER, glDriver)
         container.putExtra(LinuxEmulator.EXTRA_EMULATOR, emulator)
         // Until the user picks a build, the first installed one is used.
-        container.putExtra(LinuxEmulator.EXTRA_ID, if (emulator == LinuxEmulator.NONE) "" else (boxBuilds.firstOrNull { it.id == emulatorId } ?: boxBuilds.firstOrNull())?.id ?: "")
+        val builds = if (emulator == LinuxEmulator.FEX) fexBuilds else boxBuilds
+        container.putExtra(LinuxEmulator.EXTRA_ID, if (emulator == LinuxEmulator.NONE) "" else (builds.firstOrNull { it.id == emulatorId } ?: builds.firstOrNull())?.id ?: "")
         container.putExtra(LinuxEmulator.EXTRA_PRESET, emulatorPreset)
+        // Until the user picks one, the first installed root filesystem is used.
+        container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
+        container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
+        container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
+        container.putExtra(LinuxSession.EXTRA_STEAM, if (startSteam) "1" else "0")
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
         container.putExtra("graphicsFilterMode", upscaler)
@@ -305,19 +368,26 @@ private fun LinuxContainerEditor(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(if (editing != null) "Edit Linux container" else "New Linux container") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
-            )
-        }
-    ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            SectionTitle("General")
+    // The settings, grouped. A wide screen lists the groups beside the page of the chosen one; a narrow screen stacks them
+    // as sections that open and close. Both show the same pages, each with a line that says how it is set, and a group that
+    // needs the user's attention (a missing runtime or build, a bad screen size) is the one that opens first.
+    val noRuntime = selected == null && !install.running
+    val emulatorProblem = (emulator == LinuxEmulator.BOX64 && boxBuilds.isEmpty()) ||
+        (emulator == LinuxEmulator.FEX && (fexBuilds.isEmpty() || rootfsList.isEmpty()))
+    val activeBuild = (if (emulator == LinuxEmulator.FEX) fexBuilds else boxBuilds).let { builds -> builds.firstOrNull { it.id == emulatorId } ?: builds.firstOrNull() }
+    val emulatorSummary = when (emulator) {
+        LinuxEmulator.BOX64 -> "Box64 · ${activeBuild?.version?.ifEmpty { null } ?: activeBuild?.name ?: "not installed"} · ${boxPresets[emulatorPreset] ?: emulatorPreset}"
+        LinuxEmulator.FEX -> "FEX · ${activeBuild?.version?.ifEmpty { null } ?: activeBuild?.name ?: "not installed"} · ${fexPresets[fexPreset] ?: fexPreset}"
+        else -> "None (ARM64 programs only)"
+    }
+    val frameGenerationSummary = editing?.let { container ->
+        val multiplier = LsfgManager.getMultiplier(container)
+        if (multiplier >= 2) "${multiplier}x" else "Off"
+    } ?: "Off"
+    val envCount = envVars.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
+
+    val categories = listOf(
+        EditorCategory("general", "General", name.ifBlank { "Unnamed" }, name.isBlank()) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -325,17 +395,11 @@ private fun LinuxContainerEditor(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
-            OutlinedTextField(
-                value = screenSize,
-                onValueChange = { screenSize = it },
-                label = { Text("Screen size") },
-                supportingText = { Text("WIDTHxHEIGHT, for example 1280x720") },
-                isError = !sizeValid,
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            SectionTitle("Runtime and graphics")
+        },
+        EditorCategory(
+            "runtime", "Runtime",
+            selected?.name ?: if (install.running) "Installing…" else "Not installed", noRuntime
+        ) {
             SettingsCard {
                 if (install.running) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -379,6 +443,159 @@ private fun LinuxContainerEditor(
                     ) { chosenRuntimeId = it }
                 }
                 SettingsDivider()
+                SettingToggle("Start the Steam client with the container", startSteam) { startSteam = it }
+                Text(
+                    "Starts the runtime's Steam client beside the game. The first start downloads it (1-2 minutes); its log is Winlator/logs/linux-steam.log.",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        },
+        EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {
+            SettingsCard {
+                SettingMappedChoice(
+                    "x86 emulator",
+                    emulator,
+                    linkedMapOf(LinuxEmulator.NONE to "None (ARM64 programs only)", LinuxEmulator.BOX64 to "Box64", LinuxEmulator.FEX to "FEX")
+                ) { emulator = it }
+                if (emulator == LinuxEmulator.BOX64) {
+                    SettingsDivider()
+                    if (boxBuilds.isEmpty()) {
+                        Text(
+                            "No Box64 build is installed. Install one in Components → Linux Emulator.",
+                            modifier = Modifier.padding(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        val shown = boxBuilds.firstOrNull { it.id == emulatorId } ?: boxBuilds.first()
+                        SettingMappedChoice(
+                            "Box64 build",
+                            shown.id,
+                            boxBuilds.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
+                        ) { emulatorId = it }
+                    }
+                    SettingsDivider()
+                    SettingMappedChoice("Box64 preset", emulatorPreset, boxPresets) { emulatorPreset = it }
+                }
+                if (emulator == LinuxEmulator.FEX) {
+                    SettingsDivider()
+                    if (fexBuilds.isEmpty()) {
+                        Text(
+                            "No FEX build is installed. Install one in Components → Linux Emulator.",
+                            modifier = Modifier.padding(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        val shown = fexBuilds.firstOrNull { it.id == emulatorId } ?: fexBuilds.first()
+                        SettingMappedChoice(
+                            "FEX build",
+                            shown.id,
+                            fexBuilds.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
+                        ) { emulatorId = it }
+                    }
+                    SettingsDivider()
+                    if (rootfsList.isEmpty()) {
+                        // FEX runs programs in an x86-64 userland of its own; without one it cannot start.
+                        Text(
+                            "No x86-64 root filesystem is installed. FEX needs one: install it in Components → Linux Root Filesystem.",
+                            modifier = Modifier.padding(14.dp),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        val shownRootfs = rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.first()
+                        SettingMappedChoice(
+                            "x86-64 root filesystem",
+                            shownRootfs.id,
+                            rootfsList.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
+                        ) { rootfsId = it }
+                    }
+                    SettingsDivider()
+                    SettingMappedChoice("FEX preset", fexPreset, fexPresets) { fexPreset = it }
+                    SettingsDivider()
+                    SettingToggle("Use the runtime's Vulkan (FEX thunk)", fexThunks) { fexThunks = it }
+                }
+            }
+        },
+        EditorCategory(
+            "graphics", "Graphics",
+            screenSize.trim() + " · " + (if (softwareOutput) "CPU copy" else "native output") +
+                (if (stretched) " · fit" else "") + (UPSCALER_MODES.firstOrNull { it.first == upscaler && it.first != "0" }?.let { " · " + it.second.substringBefore(" (") } ?: ""),
+            !sizeValid
+        ) {
+            SettingsCard {
+                val resolutionEntries = LinkedHashMap<String, String>().apply {
+                    RESOLUTION_PRESETS.forEach { put(it.first, it.second) }
+                    put(CUSTOM_RESOLUTION, "Custom")
+                }
+                SettingMappedChoice(
+                    "Resolution",
+                    if (customResolution) CUSTOM_RESOLUTION else screenSize.trim(),
+                    resolutionEntries
+                ) { choice ->
+                    if (choice == CUSTOM_RESOLUTION) {
+                        // Start from the size that is set now.
+                        val current = screenSize.trim()
+                        widthText = current.substringBefore('x', widthText)
+                        heightText = current.substringAfter('x', heightText)
+                        customResolution = true
+                    } else {
+                        customResolution = false
+                        screenSize = choice
+                    }
+                }
+                if (customResolution) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = widthText,
+                            onValueChange = { value ->
+                                widthText = value.filter { it.isDigit() }.take(5)
+                                screenSize = "${widthText}x$heightText"
+                            },
+                            label = { Text("Width") },
+                            isError = !sizeValid,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("×", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = heightText,
+                            onValueChange = { value ->
+                                heightText = value.filter { it.isDigit() }.take(5)
+                                screenSize = "${widthText}x$heightText"
+                            },
+                            label = { Text("Height") },
+                            isError = !sizeValid,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (!sizeValid) {
+                        Text(
+                            "A width and a height of 3 to 5 digits, for example 1280 and 720.",
+                            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                SettingsDivider()
+                SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
+                SettingsDivider()
+                // The picture is scaled by the Vulkan renderer, which "native" output uses; the CPU-copy output draws with EGL.
+                SettingMappedChoice(
+                    "Upscaler (needs native output and Fit to screen)",
+                    upscaler,
+                    UPSCALER_MODES.associateTo(LinkedHashMap<String, String>()) { it.first to it.second }
+                ) { upscaler = it }
+                SettingsDivider()
+                SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
+                SettingsDivider()
                 val driverEntries = LinkedHashMap<String, String>().apply {
                     put("", "Runtime default")
                     drivers.forEach { put(it.id, it.label()) }
@@ -401,38 +618,28 @@ private fun LinuxContainerEditor(
                     linkedMapOf("software" to "Software (llvmpipe)", "zink" to "Zink on Turnip (experimental, not working yet)")
                 ) { glDriver = it }
                 SettingsDivider()
-                SettingToggle("Software Vulkan output (CPU copy, experimental)", softwareOutput) { softwareOutput = it }
-            }
-
-            SectionTitle("x86 emulation")
-            SettingsCard {
                 SettingMappedChoice(
-                    "x86 emulator",
-                    emulator,
-                    linkedMapOf(LinuxEmulator.NONE to "None (ARM64 programs only)", LinuxEmulator.BOX64 to "Box64")
-                ) { emulator = it }
-                if (emulator == LinuxEmulator.BOX64) {
-                    SettingsDivider()
-                    if (boxBuilds.isEmpty()) {
-                        Text(
-                            "No Box64 build is installed. Install one in Components → Linux Emulator.",
-                            modifier = Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    } else {
-                        val shown = boxBuilds.firstOrNull { it.id == emulatorId } ?: boxBuilds.first()
-                        SettingMappedChoice(
-                            "Box64 build",
-                            shown.id,
-                            boxBuilds.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
-                        ) { emulatorId = it }
-                    }
-                    SettingsDivider()
-                    SettingMappedChoice("Box64 preset", emulatorPreset, boxPresets) { emulatorPreset = it }
-                }
+                    "HUD",
+                    hudMode.toString(),
+                    HUD_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
+                ) { hudMode = it.toInt() }
             }
-
-            SectionTitle("Performance")
+        },
+        EditorCategory("framegen", "Frame generation", frameGenerationSummary, false) {
+            // The multiplier and its overrides are saved on the container as they are changed, so there has to be one.
+            editing?.let { ContainerLsfgCard(it) } ?: ContainerLsfgUnavailableCard()
+            Text(
+                "Works with native output only (turn off \"Software Vulkan output\"): each generated frame is one more " +
+                    "frame to show, and the CPU copy cannot keep up with that. Import Lossless.dll under Settings > Components.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        EditorCategory(
+            "performance", "Performance",
+            "${cpuSelected.count { it }} of ${cpuSelected.size} cores · " + FPS_LABELS[fpsIndex.coerceIn(0, FPS_LABELS.size - 1)].replace("Off", "no FPS limit"),
+            false
+        ) {
             SettingsCard {
                 CpuSelectorRow("CPU cores", cpuSelected) { index, checked ->
                     // At least one core must stay selected.
@@ -444,47 +651,151 @@ private fun LinuxContainerEditor(
                     fpsIndex.toString(),
                     FPS_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
                 ) { fpsIndex = it.toInt() }
-                SettingsDivider()
-                SettingMappedChoice(
-                    "HUD",
-                    hudMode.toString(),
-                    HUD_LABELS.withIndex().associateTo(LinkedHashMap<String, String>()) { it.index.toString() to it.value }
-                ) { hudMode = it.toInt() }
-                SettingsDivider()
-                SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
-                SettingsDivider()
-                // The picture is scaled by the Vulkan renderer, which "native" output uses; the CPU-copy output draws with EGL.
-                SettingMappedChoice(
-                    "Upscaler (needs native output and Fit to screen)",
-                    upscaler,
-                    UPSCALER_MODES.associateTo(LinkedHashMap<String, String>()) { it.first to it.second }
-                ) { upscaler = it }
             }
-
-            SectionTitle("Frame generation")
-            // The multiplier and its overrides are saved on the container as they are changed, so there has to be one.
-            editing?.let { ContainerLsfgCard(it) } ?: ContainerLsfgUnavailableCard()
-            Text(
-                "Works with native output only (turn off \"Software Vulkan output\"): each generated frame is one more " +
-                    "frame to show, and the CPU copy cannot keep up with that. Import Lossless.dll under Settings > Components.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            SectionTitle("Environment variables")
+        },
+        EditorCategory("advanced", "Environment variables", if (envCount == 0) "None" else "$envCount set", false) {
             EnvironmentVariablesEditor(value = envVars, onChanged = { envVars = it })
+        }
+    )
 
-            (error ?: install.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (!GPUInformation.isAdrenoGPU(context)) {
-                Text(
-                    "The Linux runtime is only known to work on Adreno GPUs.",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
+    val problems: @Composable () -> Unit = {
+        (error ?: install.error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (!GPUInformation.isAdrenoGPU(context)) {
+            Text(
+                "The Linux runtime is only known to work on Adreno GPUs.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+    val saveButton: @Composable () -> Unit = {
+        Button(onClick = ::save, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
+            Text(if (editing != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(if (editing != null) "Edit Linux container" else "New Linux container") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+            )
+        }
+    ) { padding ->
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            if (maxWidth >= WIDE_LAYOUT_WIDTH) {
+                // Categories on the left, the chosen one's settings on the right.
+                var chosen by rememberSaveable { mutableStateOf(categories.firstOrNull { it.attention }?.id ?: "general") }
+                val page = categories.firstOrNull { it.id == chosen } ?: categories.first()
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.width(280.dp).fillMaxHeight().padding(12.dp)) {
+                        Column(
+                            Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            categories.forEach { category ->
+                                CategoryRow(category, selected = category.id == chosen) { chosen = category.id }
+                            }
+                        }
+                        Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            problems()
+                            saveButton()
+                        }
+                    }
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(page.title, style = MaterialTheme.typography.titleLarge)
+                        page.content()
+                    }
+                }
+            } else {
+                // Sections that open and close.
+                Column(
+                    Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    categories.forEach { category -> CollapsibleSection(category) }
+                    problems()
+                    saveButton()
+                }
             }
+        }
+    }
+}
 
-            Button(onClick = ::save, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
-                Text(if (editing != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
+/** One group of the editor: its name, a line saying how it is set, and its page. */
+private class EditorCategory(
+    val id: String,
+    val title: String,
+    val summary: String,
+    val attention: Boolean,
+    val content: @Composable () -> Unit
+)
+
+private val WIDE_LAYOUT_WIDTH = 720.dp
+
+@Composable
+private fun CategoryRow(category: EditorCategory, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                category.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                category.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSection(category: EditorCategory) {
+    var expanded by rememberSaveable(category.id) { mutableStateOf(category.attention) }
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Surface(onClick = { expanded = !expanded }, color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            category.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            category.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2
+                        )
+                    }
+                    Icon(if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null)
+                }
+            }
+            if (expanded) {
+                Column(
+                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) { category.content() }
             }
         }
     }

@@ -40,6 +40,8 @@ public final class LinuxSession {
     public static final String EXTRA_VULKAN_PRESENT = "linuxVulkanPresent";
     /** Container extra: "software" (default, llvmpipe) or "zink" (OpenGL on the Turnip Vulkan driver). */
     public static final String EXTRA_GL_DRIVER = "linuxGlDriver";
+    /** "1" when the Steam client is started with the container. */
+    public static final String EXTRA_STEAM = "linuxSteam";
     private static final String HOST_DIR = "opt/android-host";
     private static final String PRELOAD = "/usr/local/lib/libblsession.so";
     private static final String FAKE_PROC_DIR = "etc/bannerlator/proc";
@@ -91,29 +93,72 @@ public final class LinuxSession {
      * is started through the container's emulator, or refused with a message when there is none to use.
      */
     public static String[] programCommand(Context context, Container container, String path) {
+        return programCommand(context, container, path, null);
+    }
+
+    /** As above, with the shortcut's launch options (see {@link LinuxLaunchOptions}): its variables, wrapper and arguments. */
+    public static String[] programCommand(Context context, Container container, String path, String launchOptions) {
+        LinuxLaunchOptions options = LinuxLaunchOptions.parse(launchOptions);
         String emulatorPath = "";
         int machine = elfMachine(hostFile(context, container, path));
         if (machine == 62) {
             String choice = LinuxEmulator.choice(container);
             LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
             if (choice.equals(LinuxEmulator.NONE)) {
-                return refusal("This is an x86-64 program. Choose an x86 emulator (Box64) in the container's settings.");
+                return refusal("This is an x86-64 program. Choose an x86 emulator (Box64 or FEX) in the container's settings.");
             }
             if (emulator == null) {
                 return refusal("The selected x86 emulator is not installed. Install it in Components, Linux Emulator.");
             }
-            emulatorPath = new File(emulator.dir, emulator.emulator.equals(LinuxEmulator.FEX) ? "bin/FEXInterpreter" : "bin/box64").getPath();
+            if (emulator.emulator.equals(LinuxEmulator.FEX) && LinuxRootfs.resolve(context, container) == null) {
+                return refusal(LinuxFex.NEEDS_ROOTFS);
+            }
+            emulatorPath = LinuxEmulator.binary(emulator).getPath();
         }
         else if (machine == 3) {
             return refusal("This is a 32-bit x86 program. Only x86-64 programs are supported for now.");
         }
-        return new String[]{
+        // $1 the program, $2 the emulator (empty for a native program), $3 and $4 how many variables and wrapper words
+        // follow, then those, then the program's arguments. The variables go through env so they reach the emulator and,
+        // through it, the program; the wrapper (taskset, ...) starts the emulator.
+        List<String> command = new ArrayList<>(java.util.Arrays.asList(
                 "/bin/bash", "-c",
-                "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" && case \"$1\" in *.sh) exec bash \"$1\";; "
-                        + "*) if [ -n \"$2\" ]; then exec \"$2\" \"$1\"; else exec \"$1\"; fi;; esac",
-                "bannerlator-run", path, emulatorPath
-        };
+                (steamEnabled(container) ? STEAM_START : "")
+                        + "chmod +x \"$1\" 2>/dev/null; cd \"$(dirname \"$1\")\" || exit 1; "
+                        + "prog=\"$1\"; emu=\"$2\"; nenv=\"$3\"; nwrap=\"$4\"; shift 4; "
+                        + "envs=(\"${@:1:$nenv}\"); shift \"$nenv\"; wrap=(\"${@:1:$nwrap}\"); shift \"$nwrap\"; "
+                        + "case \"$prog\" in *.sh) exec env \"${envs[@]}\" \"${wrap[@]}\" bash \"$prog\" \"$@\";; "
+                        + "*) if [ -n \"$emu\" ]; then exec env \"${envs[@]}\" \"${wrap[@]}\" \"$emu\" \"$prog\" \"$@\"; "
+                        + "else exec env \"${envs[@]}\" \"${wrap[@]}\" \"$prog\" \"$@\"; fi;; esac",
+                "bannerlator-run", path, emulatorPath,
+                String.valueOf(options.env.size()), String.valueOf(options.wrapper.size())));
+        for (Map.Entry<String, String> entry : options.env.entrySet()) command.add(entry.getKey() + "=" + entry.getValue());
+        command.addAll(options.wrapper);
+        command.addAll(options.args);
+        return command.toArray(new String[0]);
     }
+
+    public static boolean steamEnabled(Container container) {
+        return "1".equals(container.getExtra(EXTRA_STEAM));
+    }
+
+    /**
+     * Starts the runtime's native arm64 Steam client beside the program, on the container's own display (no gamescope).
+     * The first run downloads the client (bannerlator-steam-install), so all of it happens in the background; the
+     * client's output goes to Winlator/logs/linux-steam.log on shared storage. Files a killed session left behind are cleared first, as the runtime's
+     * own session does.
+     */
+    private static final String STEAM_START =
+            "( export XDG_DATA_HOME=\"${XDG_DATA_HOME:-$HOME/.local/share}\"; steam_root=\"$XDG_DATA_HOME/Steam\"; "
+                    + "mkdir -p /storage/emulated/0/Winlator/logs; exec >/storage/emulated/0/Winlator/logs/linux-steam.log 2>&1; "
+                    + "echo \"== steam start $(date) uid=$(id -u) home=$HOME\"; command -v bannerlator-steam-install curl unzip pgrep; "
+                    + "bannerlator-steam-install || exit 1; "
+                    + "if ! pgrep -f 'steamwebhelper|steamrtarm64/steam' >/dev/null 2>&1; then "
+                    + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; fi; "
+                    + "export STEAM_RUNTIME=1 SDL_VIDEO_X11_DGAMOUSE=0 "
+                    + "LD_LIBRARY_PATH=\"$steam_root/steamrtarm64:$steam_root/steamrtarm64/panorama\"; "
+                    + "exec \"$steam_root/steamrtarm64/steam\" -clientbeta publicbeta -no-cef-sandbox -cef-force-gpu "
+                    + "-cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan ) & ";
 
     public static Launch build(Context context, ImageFs imageFs, Container container,
                                LinuxRuntime.Installed runtime, String[] guestCommand) {
@@ -295,6 +340,13 @@ public final class LinuxSession {
             }
         }
 
+        else if (emulator != null && emulator.emulator.equals(LinuxEmulator.FEX)) {
+            // FEX runs the program in an x86-64 root filesystem of its own, so nothing of Box64's applies. A missing
+            // root filesystem is reported when the program is started (programCommand).
+            String problem = LinuxFex.prepare(context, container, emulator, env);
+            if (problem != null) Log.w(TAG, problem);
+        }
+
         // Native libraries the emulated program's wrapped libraries need that the runtime does not ship: the
         // emulator package's lib/host and the container's own hostlibs folder.
         java.util.List<String> extraLibs = new ArrayList<>();
@@ -302,7 +354,8 @@ public final class LinuxSession {
         if (containerLibs.isDirectory()) extraLibs.add("/root/hostlibs");
         // libXss (X screensaver): Box64 wraps it, the runtime does not ship it, and a game with an embedded
         // Chromium (CEF) needs it to start. Arch Linux ARM's libxss 1.2.5, taken from the package unchanged.
-        File xss = stageAsset(context, "libXss.so.1");
+        // (Box64 only: FEX's guest uses the x86-64 libXss of its own root filesystem.)
+        File xss = emulator != null && emulator.emulator.equals(LinuxEmulator.FEX) ? null : stageAsset(context, "libXss.so.1");
         if (xss != null) extraLibs.add(xss.getParent());
         if (emulator != null && new File(emulator.dir, "lib/host").isDirectory()) {
             extraLibs.add(new File(emulator.dir, "lib/host").getPath());

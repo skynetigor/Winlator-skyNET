@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** The x86 emulators (Box64, later FEX) installed for Linux containers, one directory each. */
+/** The x86 emulators (Box64 and FEX) installed for Linux containers, one directory each. */
 public final class LinuxEmulator {
     public static final String NONE = "none";
     public static final String BOX64 = "box64";
@@ -23,6 +23,10 @@ public final class LinuxEmulator {
     public static final String EXTRA_EMULATOR = "linuxEmulator";
     public static final String EXTRA_ID = "linuxEmulatorId";
     public static final String EXTRA_PRESET = "linuxEmulatorPreset";
+    /** FEX only: the x86-64 root filesystem it runs programs in (see {@link LinuxRootfs}), its GPU thunks and preset. */
+    public static final String EXTRA_ROOTFS = "linuxRootfsId";
+    public static final String EXTRA_FEX_THUNKS = "linuxFexThunks";
+    public static final String EXTRA_FEX_PRESET = "linuxFexPreset";
 
     public static final class Installed {
         public final String id;
@@ -49,7 +53,25 @@ public final class LinuxEmulator {
     public static boolean isInstalled(Context context, String id) {
         if (id == null || id.isEmpty()) return false;
         File dir = new File(baseDir(context), id);
-        return new File(dir, "bin/box64").isFile() || new File(dir, "bin/FEXInterpreter").isFile();
+        return new File(dir, "bin/box64").isFile() || fexBinary(dir) != null;
+    }
+
+    /** FEX's one program (it is the loader when given a program to run); older packages named it FEXInterpreter. */
+    static File fexBinary(File dir) {
+        for (String name : new String[]{"bin/FEX", "bin/FEXInterpreter"}) {
+            File file = new File(dir, name);
+            if (file.isFile()) return file;
+        }
+        return null;
+    }
+
+    /** The executable that runs x86-64 programs for this build. */
+    public static File binary(Installed installed) {
+        if (installed.emulator.equals(FEX)) {
+            File fex = fexBinary(installed.dir);
+            return fex != null ? fex : new File(installed.dir, "bin/FEX");
+        }
+        return new File(installed.dir, "bin/box64");
     }
 
     public static List<Installed> list(Context context) {

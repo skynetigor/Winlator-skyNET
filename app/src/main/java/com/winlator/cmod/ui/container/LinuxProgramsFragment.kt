@@ -215,8 +215,9 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             ).show()
             return@rememberLauncherForActivityResult
         }
-        if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) != LinuxEmulator.NONE) {
-            // An x86-64 program is read by the emulator, not run by the kernel, so it can stay on shared storage.
+        if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) == LinuxEmulator.BOX64) {
+            // Box64 reads an x86-64 program instead of mapping it, so it can stay on shared storage. FEX maps the program
+            // and its libraries into memory as executable, which shared storage refuses: they are copied like ARM64 ones.
             addProgram(file.nameWithoutExtension, file.path)
             return@rememberLauncherForActivityResult
         }
@@ -338,39 +339,59 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
 
     pendingCopy?.let { file ->
         val folder = file.parentFile ?: file
+        // A game keeps its data beside the folder of its program (BeamNG's BinLinux sits next to content, lua, ...) and
+        // finds it from the program's path, so the folder alone is not always enough: the game's folder can be copied too.
+        // Its virtual file system does not follow symbolic links, so a link back to the data on shared storage will not do.
+        val gameFolder = folder.parentFile?.takeIf { folder != file && it.parentFile != null && it.name.isNotEmpty() }
+        var gameSize by remember(file) { mutableStateOf<Long?>(null) }
+        LaunchedEffect(file) {
+            if (gameFolder != null) {
+                Thread { val size = directorySize(gameFolder); main.post { gameSize = size } }.start()
+            }
+        }
+
+        fun copyAndAdd(source: File, programInside: String) {
+            pendingCopy = null
+            copying = true
+            Executors.newSingleThreadExecutor().execute {
+                // Another version of the game may already sit in a folder of this name: do not overwrite it.
+                val programs = File(container.linuxHomeDir, "programs")
+                val target = freeFolder(programs, source.name)
+                var ok = false
+                try {
+                    ok = FileUtils.copy(source, target, Callback<File> { copied -> FileUtils.chmod(copied, 505) /* octal 0771 */ })
+                } catch (e: Exception) {
+                    ok = false
+                }
+                main.post {
+                    copying = false
+                    if (ok) {
+                        addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/$programInside${file.name}")
+                    } else {
+                        Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { pendingCopy = null },
             title = { Text("Copy into the container?") },
             text = {
                 Text(
                     "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
-                        "(${formatSize(pendingCopySize)}) will be copied into this container."
+                        "(${formatSize(pendingCopySize)}) will be copied into this container." +
+                        if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
+                            "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead." else ""
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    pendingCopy = null
-                    copying = true
-                    Executors.newSingleThreadExecutor().execute {
-                        // Another version of the game may already sit in a folder of this name: do not overwrite it.
-                        val programs = File(container.linuxHomeDir, "programs")
-                        val target = freeFolder(programs, folder.name)
-                        var ok = false
-                        try {
-                            ok = FileUtils.copy(folder, target, Callback<File> { copied -> FileUtils.chmod(copied, 505) /* octal 0771 */ })
-                        } catch (e: Exception) {
-                            ok = false
-                        }
-                        main.post {
-                            copying = false
-                            if (ok) {
-                                addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/${file.name}")
-                            } else {
-                                Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
-                            }
-                        }
+                Row {
+                    if (gameFolder != null) {
+                        TextButton(onClick = { copyAndAdd(gameFolder, "${folder.name}/") }) { Text("Whole game") }
                     }
-                }) { Text("Copy") }
+                    TextButton(onClick = { copyAndAdd(folder, "") }) { Text("Folder only") }
+                }
             },
             dismissButton = { TextButton(onClick = { pendingCopy = null }) { Text("Cancel") } }
         )

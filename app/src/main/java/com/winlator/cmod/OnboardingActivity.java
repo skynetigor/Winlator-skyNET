@@ -35,6 +35,7 @@ import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineRuntimeGuard;
 import com.winlator.cmod.linux.LinuxDriverManager;
 import com.winlator.cmod.linux.LinuxEmulator;
+import com.winlator.cmod.linux.LinuxRootfs;
 import com.winlator.cmod.linux.LinuxRuntime;
 import com.winlator.cmod.linux.LinuxRuntimeCatalog;
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask;
@@ -90,6 +91,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private static final int REQUEST_LOCAL_LINUX_DRIVER = 825;
     private static final String LINUX_DRIVER_PREFIX = "linux-driver:";
     private static final String LINUX_EMULATOR_PREFIX = "linux-emulator:";
+    private static final String LINUX_ROOTFS_PREFIX = "linux-rootfs:";
     /** A driver of the registry that is not installed yet (an installed one is LINUX_DRIVER_PREFIX + its folder id). */
     private static final String LINUX_DRIVER_DOWNLOAD_PREFIX = "linux-driver-download:";
 
@@ -99,6 +101,7 @@ public class OnboardingActivity extends AppCompatActivity {
     private final ArrayList<RemoteDriverCatalog.Entry> remoteDrivers = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRuntimes = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxEmulators = new ArrayList<>();
+    private final ArrayList<LinuxRuntimeCatalog.Entry> linuxRootfs = new ArrayList<>();
     private final ArrayList<LinuxRuntimeCatalog.Entry> linuxDrivers = new ArrayList<>();
 
     private SharedPreferences preferences;
@@ -151,12 +154,14 @@ public class OnboardingActivity extends AppCompatActivity {
                         else if (componentId.startsWith("remote-driver:")) installRemoteDriver(componentId);
                         else if (componentId.startsWith(LINUX_RUNTIME_PREFIX)) installLinuxRuntime(componentId);
                         else if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) installLinuxEmulator(componentId);
+                        else if (componentId.startsWith(LINUX_ROOTFS_PREFIX)) installLinuxRootfs(componentId);
                         else if (componentId.startsWith(LINUX_DRIVER_DOWNLOAD_PREFIX)) installLinuxDriver(componentId);
                     }
 
                     @Override
                     public void onCancel(@NonNull String componentId) {
-                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX) || componentId.startsWith(LINUX_EMULATOR_PREFIX)) {
+                        if (componentId.startsWith(LINUX_RUNTIME_PREFIX) || componentId.startsWith(LINUX_EMULATOR_PREFIX)
+                                || componentId.startsWith(LINUX_ROOTFS_PREFIX)) {
                             LinuxRuntimeInstallTask.cancel();
                         }
                     }
@@ -571,6 +576,36 @@ public class OnboardingActivity extends AppCompatActivity {
                     null, false, true
             ));
         }
+        Set<String> catalogRootfsIds = new HashSet<>();
+        synchronized (linuxRootfs) {
+            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
+                catalogRootfsIds.add(rootfs.id);
+                boolean installed = LinuxRootfs.isInstalled(this, rootfs.id);
+                String detail = null;
+                boolean blocked = false;
+                if (!installed) {
+                    long needed = LinuxRuntimeInstaller.requiredBytes(rootfs);
+                    long free = getFilesDir().getUsableSpace();
+                    blocked = rootfs.size > 0 && free < needed;
+                    detail = formatSize(rootfs.size) + " download \u00b7 needs ~" + formatSize(needed)
+                            + " free \u00b7 " + formatSize(free) + " free"
+                            + (LinuxRuntimeInstaller.hasPartial(this, rootfs) ? " \u00b7 partly downloaded, will resume" : "");
+                }
+                ui.add(new OnboardingComponent(
+                        LINUX_ROOTFS_PREFIX + rootfs.id, "Linux Root Filesystem", rootfs.name, installed, false, installed,
+                        null, LinuxRootfs.containerUsing(this, rootfs.id) != null, false, rootfs.channel,
+                        detail, blocked, true
+                ));
+            }
+        }
+        for (LinuxRootfs.Installed rootfs : LinuxRootfs.list(this)) {
+            if (catalogRootfsIds.contains(rootfs.id)) continue;
+            ui.add(new OnboardingComponent(
+                    LINUX_ROOTFS_PREFIX + rootfs.id, "Linux Root Filesystem", rootfs.name, true, false, true,
+                    null, LinuxRootfs.containerUsing(this, rootfs.id) != null, false, null,
+                    null, false, true
+            ));
+        }
         Set<String> installedDriverNames = new HashSet<>();
         for (LinuxDriverManager.Installed driver : LinuxDriverManager.list(this)) {
             installedDriverNames.add(driver.name);
@@ -774,6 +809,11 @@ public class OnboardingActivity extends AppCompatActivity {
                 if (emulator.id.equals(packageId)) return LINUX_EMULATOR_PREFIX + packageId;
             }
         }
+        synchronized (linuxRootfs) {
+            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
+                if (rootfs.id.equals(packageId)) return LINUX_ROOTFS_PREFIX + packageId;
+            }
+        }
         return LINUX_RUNTIME_PREFIX + packageId;
     }
 
@@ -882,9 +922,16 @@ public class OnboardingActivity extends AppCompatActivity {
                     linuxEmulators.addAll(loaded);
                 }
             }
+            List<LinuxRuntimeCatalog.Entry> rootfsLoaded = LinuxRuntimeCatalog.fetchRootfs();
+            if (rootfsLoaded != null) {
+                synchronized (linuxRootfs) {
+                    linuxRootfs.clear();
+                    linuxRootfs.addAll(rootfsLoaded);
+                }
+            }
             android.util.Log.d("OnboardingActivity", "Linux catalog: " + (drivers == null ? "no" : drivers.size()) + " drivers, "
                     + (loaded == null ? "no" : loaded.size()) + " emulators");
-            if (drivers != null || loaded != null) runOnUiThread(this::syncComposeCatalog);
+            if (drivers != null || loaded != null || rootfsLoaded != null) runOnUiThread(this::syncComposeCatalog);
         });
     }
 
@@ -966,6 +1013,53 @@ public class OnboardingActivity extends AppCompatActivity {
         }
     }
 
+    private void installLinuxRootfs(String componentId) {
+        if (installBusy) return;
+        LinuxRuntimeCatalog.Entry found = null;
+        synchronized (linuxRootfs) {
+            for (LinuxRuntimeCatalog.Entry rootfs : linuxRootfs) {
+                if ((LINUX_ROOTFS_PREFIX + rootfs.id).equals(componentId)) found = rootfs;
+            }
+        }
+        if (found == null) return;
+        if (LinuxRuntimeInstallTask.start(this, found)) {
+            installBusy = true;
+            composeController.setInstallBusy(componentId, true);
+            composeController.updateInstallProgress("Starting", 0);
+        }
+    }
+
+    private void requestRemoveLinuxRootfs(String componentId) {
+        String id = componentId.substring(LINUX_ROOTFS_PREFIX.length());
+        String using = LinuxRootfs.containerUsing(this, id);
+        if (using != null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Root filesystem is in use")
+                    .setMessage("This root filesystem cannot be deleted because it is used by " + using + ".")
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Delete root filesystem?")
+                .setMessage("The installed files will be removed. You can download it again later.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Delete", (d, w) -> {
+                    if (installBusy) return;
+                    installBusy = true;
+                    composeController.setInstallBusy(componentId, true);
+                    io.execute(() -> {
+                        LinuxRootfs.remove(this, id);
+                        runOnUiThread(() -> {
+                            installBusy = false;
+                            composeController.setInstallBusy(null, false);
+                            syncComposeCatalog();
+                        });
+                    });
+                })
+                .show();
+    }
+
     private void requestRemoveLinuxEmulator(String componentId) {
         String id = componentId.substring(LINUX_EMULATOR_PREFIX.length());
         String using = LinuxEmulator.containerUsing(this, id);
@@ -1031,6 +1125,10 @@ public class OnboardingActivity extends AppCompatActivity {
     private void requestRemoveComponent(String componentId) {
         if (componentId.startsWith(LINUX_EMULATOR_PREFIX)) {
             requestRemoveLinuxEmulator(componentId);
+            return;
+        }
+        if (componentId.startsWith(LINUX_ROOTFS_PREFIX)) {
+            requestRemoveLinuxRootfs(componentId);
             return;
         }
         if (componentId.startsWith(LINUX_DRIVER_PREFIX)) {
