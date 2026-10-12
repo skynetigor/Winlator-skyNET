@@ -31,6 +31,7 @@ public class GraphicsContext extends XResource {
     private int background = 0xffffff;
     private int foreground = 0x000000;
     private int lineWidth = 1;
+    private int font;
     private int planeMask = -1;
     private SubwindowMode subwindowMode = SubwindowMode.CLIP_BY_CHILDREN;
 
@@ -53,6 +54,15 @@ public class GraphicsContext extends XResource {
 
     public void setBackground(int background) {
         this.background = background;
+    }
+
+    /** The id of the font text is drawn with, 0 when none was set. */
+    public int getFont() {
+        return font;
+    }
+
+    public void setFont(int font) {
+        this.font = font;
     }
 
     public int getLineWidth() {

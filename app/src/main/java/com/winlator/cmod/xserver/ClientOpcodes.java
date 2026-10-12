@@ -30,6 +30,9 @@ public abstract class ClientOpcodes {
     public static final byte GET_INPUT_FOCUS = 43;
     public static final byte QUERY_KEYMAP = 44;
     public static final byte OPEN_FONT = 45;
+    public static final byte CLOSE_FONT = 46;
+    public static final byte QUERY_FONT = 47;
+    public static final byte QUERY_TEXT_EXTENTS = 48;
     public static final byte LIST_FONTS = 49;
     public static final byte CREATE_PIXMAP = 53;
     public static final byte FREE_PIXMAP = 54;
@@ -43,6 +46,10 @@ public abstract class ClientOpcodes {
     public static final byte POLY_SEGMENT = 66;
     public static final byte POLY_RECTANGLE = 67;
     public static final byte POLY_FILL_RECTANGLE = 70;
+    public static final byte POLY_TEXT_8 = 74;
+    public static final byte POLY_TEXT_16 = 75;
+    public static final byte IMAGE_TEXT_8 = 76;
+    public static final byte IMAGE_TEXT_16 = 77;
     public static final byte PUT_IMAGE = 72;
     public static final byte GET_IMAGE = 73;
     public static final byte CREATE_COLORMAP = 78;

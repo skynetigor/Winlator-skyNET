@@ -377,8 +377,29 @@ public class XClientRequestHandler implements RequestHandler {
                 case ClientOpcodes.OPEN_FONT:
                     FontRequests.openFont(client, inputStream, outputStream);
                     break;
+                case ClientOpcodes.CLOSE_FONT:
+                    FontRequests.closeFont(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.QUERY_FONT:
+                    FontRequests.queryFont(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.QUERY_TEXT_EXTENTS:
+                    FontRequests.queryTextExtents(client, inputStream, outputStream);
+                    break;
                 case ClientOpcodes.LIST_FONTS:
                     FontRequests.listFonts(client, inputStream, outputStream);
+                    break;
+                case ClientOpcodes.POLY_TEXT_8:
+                case ClientOpcodes.POLY_TEXT_16:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        FontRequests.polyText(client, inputStream, opcode == ClientOpcodes.POLY_TEXT_16);
+                    }
+                    break;
+                case ClientOpcodes.IMAGE_TEXT_8:
+                case ClientOpcodes.IMAGE_TEXT_16:
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        FontRequests.imageText(client, inputStream, opcode == ClientOpcodes.IMAGE_TEXT_16);
+                    }
                     break;
                 case ClientOpcodes.CREATE_PIXMAP:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.PIXMAP_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
@@ -424,10 +445,14 @@ public class XClientRequestHandler implements RequestHandler {
                     }
                     break;
                 case ClientOpcodes.POLY_SEGMENT:
-                    client.skipRequest();
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.polySegment(client, inputStream, outputStream);
+                    }
                     break;
                 case ClientOpcodes.POLY_RECTANGLE:
-                    client.skipRequest();
+                    try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {
+                        DrawRequests.polyRectangle(client, inputStream, outputStream);
+                    }
                     break;
                 case ClientOpcodes.POLY_FILL_RECTANGLE:
                     try (XLock lock = client.xServer.lock(XServer.Lockable.DRAWABLE_MANAGER, XServer.Lockable.GRAPHIC_CONTEXT_MANAGER)) {

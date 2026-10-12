@@ -169,8 +169,76 @@ public abstract class DrawRequests {
             short y = inputStream.readShort();
             short width = inputStream.readShort();
             short height = inputStream.readShort();
-            drawable.fillRect(x, y, width, height, graphicsContext.getBackground());
+            drawable.fillRect(x, y, width, height, graphicsContext.getForeground());
             length -= 8;
         }
+    }
+
+    /** Outlines: one pixel wide (or the GC's line width), in the foreground colour. */
+    public static void polyRectangle(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        int drawableId = inputStream.readInt();
+        int gcId = inputStream.readInt();
+        int length = client.getRemainingRequestLength();
+
+        Drawable drawable = client.xServer.drawableManager.getDrawable(drawableId);
+        if (drawable == null) {
+            inputStream.skip(length);
+            throw new BadDrawable(drawableId);
+        }
+        GraphicsContext graphicsContext = client.xServer.graphicsContextManager.getGraphicsContext(gcId);
+        if (graphicsContext == null) {
+            inputStream.skip(length);
+            throw new BadGraphicsContext(gcId);
+        }
+        int lineWidth = Math.max(1, graphicsContext.getLineWidth());
+        int color = graphicsContext.getForeground();
+
+        while (length >= 8) {
+            int x = inputStream.readShort();
+            int y = inputStream.readShort();
+            int width = inputStream.readUnsignedShort();
+            int height = inputStream.readUnsignedShort();
+            length -= 8;
+            // The outline covers width + 1 by height + 1 pixels.
+            drawable.fillRect(x, y, width + 1, lineWidth, color);
+            drawable.fillRect(x, y + height + 1 - lineWidth, width + 1, lineWidth, color);
+            drawable.fillRect(x, y, lineWidth, height + 1, color);
+            drawable.fillRect(x + width + 1 - lineWidth, y, lineWidth, height + 1, color);
+        }
+        if (length > 0) inputStream.skip(length);
+    }
+
+    public static void polySegment(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
+        int drawableId = inputStream.readInt();
+        int gcId = inputStream.readInt();
+        int length = client.getRemainingRequestLength();
+
+        Drawable drawable = client.xServer.drawableManager.getDrawable(drawableId);
+        if (drawable == null) {
+            inputStream.skip(length);
+            throw new BadDrawable(drawableId);
+        }
+        GraphicsContext graphicsContext = client.xServer.graphicsContextManager.getGraphicsContext(gcId);
+        if (graphicsContext == null) {
+            inputStream.skip(length);
+            throw new BadGraphicsContext(gcId);
+        }
+        int lineWidth = Math.max(1, graphicsContext.getLineWidth());
+        int color = graphicsContext.getForeground();
+
+        while (length >= 8) {
+            short x1 = inputStream.readShort();
+            short y1 = inputStream.readShort();
+            short x2 = inputStream.readShort();
+            short y2 = inputStream.readShort();
+            length -= 8;
+            if (x1 == x2 || y1 == y2) {
+                // Horizontal and vertical lines (bevels, rules) are the common case: a filled strip, ends included.
+                drawable.fillRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1) + lineWidth, Math.abs(y2 - y1) + lineWidth, color);
+            } else {
+                drawable.drawLine(x1, y1, x2, y2, color, lineWidth);
+            }
+        }
+        if (length > 0) inputStream.skip(length);
     }
 }

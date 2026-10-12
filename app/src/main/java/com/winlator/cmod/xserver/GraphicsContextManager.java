@@ -49,6 +49,9 @@ public class GraphicsContextManager extends XResourceManager {
                 case GraphicsContext.FLAG_SUBWINDOW_MODE:
                     dstContext.setSubwindowMode(srcContext.getSubwindowMode());
                     break;
+                case GraphicsContext.FLAG_FONT:
+                    dstContext.setFont(srcContext.getFont());
+                    break;
                 case GraphicsContext.FLAG_LINE_STYLE:
                 case GraphicsContext.FLAG_CAP_STYLE:
                 case GraphicsContext.FLAG_JOIN_STYLE:
@@ -59,7 +62,6 @@ public class GraphicsContextManager extends XResourceManager {
                 case GraphicsContext.FLAG_ARC_MODE:
                 case GraphicsContext.FLAG_TILE:
                 case GraphicsContext.FLAG_STIPPLE:
-                case GraphicsContext.FLAG_FONT:
                 case GraphicsContext.FLAG_CLIP_MASK:
                 case GraphicsContext.FLAG_TILE_STIPPLE_X_ORIGIN:
                 case GraphicsContext.FLAG_TILE_STIPPLE_Y_ORIGIN:
@@ -92,6 +94,9 @@ public class GraphicsContextManager extends XResourceManager {
                 case GraphicsContext.FLAG_SUBWINDOW_MODE:
                     graphicsContext.setSubwindowMode(GraphicsContext.SubwindowMode.values()[inputStream.readInt()]);
                     break;
+                case GraphicsContext.FLAG_FONT:
+                    graphicsContext.setFont(inputStream.readInt());
+                    break;
                 case GraphicsContext.FLAG_LINE_STYLE:
                 case GraphicsContext.FLAG_CAP_STYLE:
                 case GraphicsContext.FLAG_JOIN_STYLE:
@@ -102,7 +107,6 @@ public class GraphicsContextManager extends XResourceManager {
                 case GraphicsContext.FLAG_ARC_MODE:
                 case GraphicsContext.FLAG_TILE:
                 case GraphicsContext.FLAG_STIPPLE:
-                case GraphicsContext.FLAG_FONT:
                 case GraphicsContext.FLAG_CLIP_MASK:
                 case GraphicsContext.FLAG_TILE_STIPPLE_X_ORIGIN:
                 case GraphicsContext.FLAG_TILE_STIPPLE_Y_ORIGIN:
