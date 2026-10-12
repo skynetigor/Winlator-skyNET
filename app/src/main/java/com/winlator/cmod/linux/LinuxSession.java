@@ -341,6 +341,7 @@ public final class LinuxSession {
 
         LinuxEmulator.Installed emulator = LinuxEmulator.resolve(context, container);
         if (emulator != null && emulator.emulator.equals(LinuxEmulator.BOX64)) {
+            installDebugBox64(context, emulator);
             // The libraries Box64 does not wrap come from the package; the program's own folder is searched too.
             env.put("BOX64_LD_LIBRARY_PATH", new File(emulator.dir, "lib/box64-x86_64-linux-gnu").getPath());
             env.put("BOX64_NOBANNER", "1");
@@ -393,9 +394,56 @@ public final class LinuxSession {
         if (!extraLibs.isEmpty()) env.put("LD_LIBRARY_PATH", String.join(":", extraLibs));
 
         env.putAll(userEnv(container));
+        env.putAll(debugEnv(context));
 
         List<String> result = new ArrayList<>();
         for (Map.Entry<String, String> entry : env.entrySet()) result.add(entry.getKey() + "=" + entry.getValue());
+        return result;
+    }
+
+    /**
+     * Debug builds only: a Box64 binary at Winlator/box64-override on shared storage replaces the installed build's, so
+     * a patched Box64 can be tried from a computer without publishing it. Shared storage cannot run programs, hence the
+     * copy; it is made once per file (by size and time).
+     */
+    private static void installDebugBox64(Context context, LinuxEmulator.Installed emulator) {
+        if (!com.winlator.cmod.core.AppUtils.isDebugBuild(context)) return;
+        File extras = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/box64-override-files");
+        File[] extraFiles = extras.listFiles();
+        if (extraFiles != null) {
+            for (File extra : extraFiles) {
+                File copy = new File(LinuxEmulator.binary(emulator).getParentFile(), extra.getName());
+                if (extra.isFile() && (!copy.isFile() || copy.length() != extra.length())) FileUtils.copy(extra, copy);
+            }
+        }
+        File source = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/box64-override");
+        File target = LinuxEmulator.binary(emulator);
+        if (!source.isFile()) return;
+        File stamp = new File(target.getParentFile(), ".override-stamp");
+        String id = source.length() + ":" + source.lastModified();
+        if (stamp.isFile() && id.equals(FileUtils.readString(stamp))) return;
+        if (FileUtils.copy(source, target)) {
+            FileUtils.chmod(target, 0755);
+            FileUtils.writeString(stamp, id);
+            Log.i(TAG, "Box64 replaced by " + source + " (" + id + ")");
+        }
+    }
+
+    /**
+     * Debug builds only: Winlator/linux-env.txt on shared storage (one KEY=VALUE per line) adds variables to every Linux
+     * session, so an emulator setting can be tried from a computer without opening the container's settings each time.
+     */
+    private static Map<String, String> debugEnv(Context context) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (!com.winlator.cmod.core.AppUtils.isDebugBuild(context)) return result;
+        File file = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/linux-env.txt");
+        if (!file.isFile()) return result;
+        for (String line : FileUtils.readLines(file)) {
+            line = line.trim();
+            int index = line.indexOf('=');
+            if (line.startsWith("#") || index <= 0) continue;
+            result.put(line.substring(0, index), line.substring(index + 1));
+        }
         return result;
     }
 
