@@ -48,6 +48,8 @@ public final class LinuxSession {
     public static final String EXTRA_STEAM_BIG_PICTURE = "linuxSteamBigPicture";
     /** On a Steam game's shortcut: "0" starts the whole Steam client; absent, the client starts without its window. */
     public static final String EXTRA_STEAM_MINIMAL = "steamMinimal";
+    /** Container extra: "0" keeps the Steam client's web helper drawing on the CPU; otherwise it draws on the GPU (steam-taskset.sh). */
+    public static final String EXTRA_STEAM_GPU = "linuxSteamGpu";
     /** "0" hides the button that opens the on-screen keyboard; shown when absent. */
     public static final String EXTRA_KEYBOARD_BUTTON = "linuxKeyboardButton";
     /** "0" stops the keyboard opening by itself when a text field is tapped; on when absent. */
@@ -208,10 +210,14 @@ public final class LinuxSession {
                         + "( while sleep 10; do mkdir -p /storage/emulated/0/Winlator/logs/steam-logs; "
                         + "cp -r \"$steam_root/logs/.\" /storage/emulated/0/Winlator/logs/steam-logs/ 2>/dev/null; done ) & "
                         + "rm -f \"$steam_root/.crash\" \"$steam_root/steam.pid\" \"$steam_root/config/htmlcache/\"Singleton*; "
+                        // The client starts its web helper through taskset: the stand-in (first in PATH) has the helper draw on the GPU.
+                        + "if [ -n \"$SKY_STEAM_TASKSET\" ] && [ -f \"$SKY_STEAM_TASKSET\" ]; then mkdir -p \"$HOME/.skynet/bin\"; "
+                        + "cp -f \"$SKY_STEAM_TASKSET\" \"$HOME/.skynet/bin/taskset\"; chmod 755 \"$HOME/.skynet/bin/taskset\"; "
+                        + "export PATH=\"$HOME/.skynet/bin:$PATH\"; fi; "
                         // The client works around a bug of old libXrandr by looking its functions up behind its own; with RandR 1.3 offered
                         // it asks for XRRGetOutputInfo, finds nothing (the library is not loaded yet) and crashes. Loading it first fixes that.
-                        // The client's web helper (Chromium) draws in software; Zink would break it. The games it starts get
-                        // Zink back from the launcher (SKY_GAME_GL).
+                        // The client's own OpenGL stays in software: Zink would break it (its web helper draws through Vulkan, see
+                        // steam-taskset.sh). The games it starts get Zink back from the launcher (SKY_GAME_GL).
                         + "if [ \"$GALLIUM_DRIVER\" = zink ]; then export SKY_GAME_GL=zink LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe; "
                         + "unset MESA_LOADER_DRIVER_OVERRIDE; fi; "
                         + "[ -f /usr/lib/libXrandr.so.2 ] && export LD_PRELOAD=\"/usr/lib/libXrandr.so.2${LD_PRELOAD:+:$LD_PRELOAD}\"; "
@@ -325,7 +331,10 @@ public final class LinuxSession {
         String[][] inotify = {
                 {"sys/fs/inotify/max_user_watches", "65536\n"},
                 {"sys/fs/inotify/max_user_instances", "1024\n"},
-                {"sys/fs/inotify/max_queued_events", "16384\n"}};
+                {"sys/fs/inotify/max_queued_events", "16384\n"},
+                // libpci (Chromium's GPU process, a Feral game) exits the process when it cannot open this file, which Android
+                // allows to nobody; with no device in it the scan finds no GPU on the bus and carries on.
+                {"bus/pci/devices", ""}};
         java.util.List<String> fakeNames = new ArrayList<>(java.util.Arrays.asList(FAKE_PROC_FILES));
         for (String[] entry : inotify) {
             File fake = new File(rt, FAKE_PROC_DIR + "/" + entry[0]);
@@ -333,7 +342,7 @@ public final class LinuxSession {
                 fake.getParentFile().mkdirs();
                 FileUtils.writeString(fake, entry[1]);
             }
-            fakeNames.add(entry[0]);
+            if (!fakeNames.contains(entry[0])) fakeNames.add(entry[0]);
         }
         for (String name : fakeNames) {
             File fake = new File(rt, FAKE_PROC_DIR + "/" + name);
@@ -416,6 +425,10 @@ public final class LinuxSession {
             env.put("GALLIUM_DRIVER", "llvmpipe");
         }
         env.put("PULSE_SERVER", "unix:" + new File(imageFsRoot, UnixSocketConfig.PULSE_SERVER_PATH).getPath());
+        // The Steam client's web helper draws on the GPU through this taskset stand-in unless the container turns that off.
+        File steamTaskset = stageAsset(context, "steam-taskset.sh");
+        if (steamTaskset != null) env.put("SKY_STEAM_TASKSET", steamTaskset.getPath());
+        env.put("SKY_STEAM_GPU", "0".equals(container.getExtra(EXTRA_STEAM_GPU)) ? "0" : "1");
 
         // Turnip: an imported Linux driver, or the one the runtime ships.
         String driverId = container.getExtra(LinuxDriverManager.EXTRA_DRIVER);
