@@ -30,7 +30,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,11 +44,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
@@ -69,7 +74,10 @@ import com.winlator.cmod.linux.LinuxRuntimeCatalog
 import com.winlator.cmod.linux.LinuxRuntimeInstallTask
 import com.winlator.cmod.linux.LinuxRuntimeInstaller
 import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.settings.CpuSelectorRow
+import com.winlator.cmod.ui.settings.EditorCategory
+import com.winlator.cmod.ui.settings.GroupedSettings
 import com.winlator.cmod.ui.settings.EnvironmentVariablesEditor
 import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.settings.SettingToggle
@@ -83,10 +91,17 @@ import java.util.Locale
 class LinuxContainerCreateFragment : Fragment() {
     companion object {
         private const val ARG_EDIT_CONTAINER_ID = "edit_container_id"
+        private const val ARG_STEAM = "steam"
 
         @JvmStatic
         fun forEdit(containerId: Int): LinuxContainerCreateFragment = LinuxContainerCreateFragment().apply {
             arguments = Bundle().apply { putInt(ARG_EDIT_CONTAINER_ID, containerId) }
+        }
+
+        /** The settings of the app's Steam container (see [SteamContainer]): its components to download, then its container settings. */
+        @JvmStatic
+        fun forSteam(): LinuxContainerCreateFragment = LinuxContainerCreateFragment().apply {
+            arguments = Bundle().apply { putBoolean(ARG_STEAM, true) }
         }
     }
 
@@ -97,12 +112,14 @@ class LinuxContainerCreateFragment : Fragment() {
     private val installListener = object : LinuxRuntimeInstallTask.Listener {
         override fun onProgress(id: String, phase: LinuxRuntimeInstaller.Phase, percent: Int) {
             install.running = true
+            install.currentId = id
             install.phase = phase
             install.percent = percent
         }
 
         override fun onFinished(id: String, error: String?) {
             install.running = false
+            install.currentId = ""
             install.error = error?.takeUnless { it == LinuxRuntimeInstaller.CANCELLED }
             install.succeeded = error == null
             install.finishedTick++
@@ -126,11 +143,13 @@ class LinuxContainerCreateFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View = ComposeView(requireContext()).apply {
         val editId = arguments?.getInt(ARG_EDIT_CONTAINER_ID, -1)?.takeIf { it > 0 }
+        val steam = arguments?.getBoolean(ARG_STEAM, false) == true
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         setContent {
             WinZTheme {
                 LinuxContainerEditor(
                     editId = editId,
+                    steam = steam,
                     refreshTick = refreshTick.intValue,
                     install = install,
                     onBack = { parentFragmentManager.popBackStack() },
@@ -144,6 +163,8 @@ class LinuxContainerCreateFragment : Fragment() {
 /** What the runtime download started from this screen is doing; the install itself lives in [LinuxRuntimeInstallTask]. */
 private class RuntimeInstallUi {
     var running by mutableStateOf(false)
+    /** The id of the package being installed (a Steam download installs several one after another). */
+    var currentId by mutableStateOf("")
     var phase by mutableStateOf(LinuxRuntimeInstaller.Phase.DOWNLOAD)
     var percent by mutableIntStateOf(0)
     var error by mutableStateOf<String?>(null)
@@ -164,9 +185,21 @@ private fun SectionTitle(text: String) {
     )
 }
 
+/** What the Steam settings screen adds to the container editor. */
+private class SteamScreen(
+    val defaults: SteamContainer.Defaults,
+    /** The container exists (so every component is installed): the settings can be changed. */
+    val ready: Boolean,
+    /** The card above the settings: what is to be downloaded, and how far it is. */
+    val header: @Composable () -> Unit,
+    /** Wipes the Steam container and makes a new one from the defaults. */
+    val onReset: () -> Unit
+)
+
 @Composable
 private fun LinuxContainerEditor(
     editId: Int?,
+    steam: Boolean,
     refreshTick: Int,
     install: RuntimeInstallUi,
     onBack: () -> Unit,
@@ -174,17 +207,180 @@ private fun LinuxContainerEditor(
 ) {
     val context = LocalContext.current
     val manager = remember { ContainerManager(context) }
+    if (steam) {
+        SteamSettingsScreen(manager, refreshTick, install, onBack, onDone)
+        return
+    }
     val editing = remember { editId?.let { manager.getContainerById(it) } }
+    LinuxContainerEditorBody(editing, null, manager, refreshTick, install, onBack, onDone)
+}
+
+/**
+ * The Steam settings: the container's own settings, greyed out until the components Steam needs are installed. At the top, a card
+ * says what is to be downloaded and does it; when the last package is in, the container appears (see [SteamContainer.ensure])
+ * and the settings below become the container's.
+ */
+@Composable
+private fun SteamSettingsScreen(
+    manager: ContainerManager,
+    refreshTick: Int,
+    install: RuntimeInstallUi,
+    onBack: () -> Unit,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
+    val defaults = remember { SteamContainer.defaults(context, false) }
+    var container by remember { mutableStateOf(SteamContainer.ensure(context, manager)) }
+    var plan by remember { mutableStateOf<SteamContainer.Plan?>(null) }
+    var planTick by remember { mutableIntStateOf(0) }
+
+    // What is still to be downloaded: the catalogs are read off the main thread, again after a download ended or on "try again".
+    LaunchedEffect(container == null, refreshTick, install.finishedTick, planTick) {
+        if (container == null) {
+            plan = null
+            plan = withContext(Dispatchers.IO) { SteamContainer.plan(context) }
+        }
+    }
+    // The container appears when the last component is in.
+    LaunchedEffect(install.finishedTick) {
+        if (install.finishedTick > 0 && container == null) container = SteamContainer.ensure(context, manager)
+    }
+
+    val header: @Composable () -> Unit = {
+        SteamComponentsCard(
+            plan = plan, install = install, container = container,
+            onRetry = { planTick++ },
+            onDownload = {
+                val current = plan
+                if (current != null && current.error == null && current.install.isNotEmpty() && LinuxRuntimeInstallTask.runningId() == null) {
+                    install.error = null
+                    install.running = true
+                    install.percent = 0
+                    install.phase = LinuxRuntimeInstaller.Phase.DOWNLOAD
+                    LinuxRuntimeInstallTask.startAll(context, current.install)
+                }
+            }
+        )
+    }
+    key(container?.id) {
+        LinuxContainerEditorBody(
+            container,
+            SteamScreen(defaults, container != null, header) { container = SteamContainer.reset(context, manager) },
+            manager, refreshTick, install, onBack, onDone
+        )
+    }
+}
+
+@Composable
+private fun SteamComponentsCard(
+    plan: SteamContainer.Plan?,
+    install: RuntimeInstallUi,
+    container: Container?,
+    onRetry: () -> Unit,
+    onDownload: () -> Unit
+) {
+    val context = LocalContext.current
+    SettingsCard {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (container != null) {
+                val games = remember(container.id, install.finishedTick) { SteamContainer.gameCount(container) }
+                Text("Steam is ready", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (games == 0) "Open the Steam shortcut in the library to sign in; the games you install there get shortcuts of their own."
+                    else if (games == 1) "1 game is installed in Steam." else "$games games are installed in Steam.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                return@Column
+            }
+            Text("Steam needs a few components", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "The Linux runtime, Box64 (it runs the games' x86-64 code) and the Turnip graphics driver. The settings below are Steam's own; " +
+                    "they can be changed once everything is installed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (plan == null) {
+                Text("Checking what has to be downloaded…")
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                return@Column
+            }
+            if (plan.error != null) {
+                Text(plan.error, color = MaterialTheme.colorScheme.error)
+                OutlinedButton(onClick = onRetry) { Text("Try again") }
+                return@Column
+            }
+            val installed = remember(install.finishedTick, install.currentId, install.running) {
+                plan.install.filter { entryInstalled(context, it) }.map { it.id }.toSet()
+            }
+            plan.install.forEach { entry ->
+                val state = when {
+                    entry.id in installed -> "installed"
+                    install.running && install.currentId == entry.id -> when (install.phase) {
+                        LinuxRuntimeInstaller.Phase.DOWNLOAD -> "downloading ${install.percent}%"
+                        LinuxRuntimeInstaller.Phase.VERIFY -> "checking ${install.percent}%"
+                        LinuxRuntimeInstaller.Phase.EXTRACT -> "unpacking ${install.percent}%"
+                    }
+                    install.running -> "waiting"
+                    else -> formatMegabytes(entry.size)
+                }
+                Text("${entry.name} · $state")
+                if (install.running && install.currentId == entry.id) {
+                    LinearProgressIndicator(progress = { install.percent / 100f }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            val free = context.filesDir.usableSpace
+            val notEnoughSpace = plan.space > 0 && free < plan.space
+            if (notEnoughSpace) {
+                Text(
+                    "Not enough free space: needs about ${formatMegabytes(plan.space)}, ${formatMegabytes(free)} free.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            install.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (install.running) {
+                OutlinedButton(onClick = { LinuxRuntimeInstallTask.cancel() }) { Text("Cancel") }
+            } else {
+                Button(onClick = onDownload, enabled = plan.install.isNotEmpty() && !notEnoughSpace) {
+                    Text("Download (${formatMegabytes(plan.download)})")
+                }
+            }
+        }
+    }
+}
+
+private fun entryInstalled(context: android.content.Context, entry: LinuxRuntimeCatalog.Entry): Boolean = when (entry.kind) {
+    com.winlator.cmod.linux.LinuxPackages.KIND_RUNTIME -> LinuxRuntime.isInstalled(context, entry.id)
+    com.winlator.cmod.linux.LinuxPackages.KIND_EMULATOR -> LinuxEmulator.isInstalled(context, entry.id)
+    com.winlator.cmod.linux.LinuxPackages.KIND_DRIVER -> LinuxDriverManager.isInstalled(context, entry.id)
+    else -> false
+}
+
+@Composable
+private fun LinuxContainerEditorBody(
+    editing: Container?,
+    steam: SteamScreen?,
+    manager: ContainerManager,
+    refreshTick: Int,
+    install: RuntimeInstallUi,
+    onBack: () -> Unit,
+    onDone: () -> Unit
+) {
+    val context = LocalContext.current
     val cores = remember { Runtime.getRuntime().availableProcessors().coerceIn(1, 32) }
 
     var name by remember { mutableStateOf(editing?.name ?: "Linux") }
     var screenSize by remember { mutableStateOf(editing?.screenSize ?: Container.DEFAULT_SCREEN_SIZE) }
     var chosenRuntimeId by remember { mutableStateOf(editing?.let { LinuxRuntime.resolve(context, it)?.id } ?: "") }
-    var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: "") }
-    var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: LinuxEmulator.NONE) }
-    var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: "") }
+    var driverId by remember { mutableStateOf(editing?.getExtra(LinuxDriverManager.EXTRA_DRIVER) ?: steam?.defaults?.driver ?: "") }
+    var emulator by remember { mutableStateOf(editing?.let { LinuxEmulator.choice(it) } ?: if (steam != null) LinuxEmulator.BOX64 else LinuxEmulator.NONE) }
+    var emulatorId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ID) ?: steam?.defaults?.emulator ?: "") }
     var emulatorPreset by remember {
-        mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_PRESET)?.takeIf { it.isNotEmpty() } ?: Box64Preset.COMPATIBILITY)
+        mutableStateOf(
+            editing?.getExtra(LinuxEmulator.EXTRA_PRESET)?.takeIf { it.isNotEmpty() }
+                ?: steam?.defaults?.emulatorPreset ?: Box64Preset.COMPATIBILITY
+        )
     }
     // FEX only: the root filesystem it runs in, its own preset, and whether the guest's Vulkan/OpenGL go to the runtime's.
     var rootfsId by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_ROOTFS) ?: "") }
@@ -195,12 +391,13 @@ private fun LinuxContainerEditor(
     var touchscreen by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_TOUCHSCREEN) != "0") }
     var keyboardButton by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON) != "0") }
     var autoKeyboard by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_AUTO_KEYBOARD) != "0") }
-    var startSteam by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM) == "1") }
-    var steamBigPicture by remember { mutableStateOf(editing?.getExtra(LinuxSession.EXTRA_STEAM_BIG_PICTURE) == "1") }
     var fexThunks by remember { mutableStateOf(editing?.getExtra(LinuxEmulator.EXTRA_FEX_THUNKS) != "0") }
     var glDriver by remember {
         // OpenGL 4.6 on the Adreno through Zink (over Turnip) works; new containers use it, and one without a choice keeps llvmpipe.
-        mutableStateOf(if (editing == null || editing.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software")
+        mutableStateOf(
+            if (editing == null) steam?.defaults?.glDriver ?: "zink"
+            else if (editing.getExtra(LinuxSession.EXTRA_GL_DRIVER) == "zink") "zink" else "software"
+        )
     }
     var softwareOutput by remember {
         // New containers start with native (dma-buf) output; the CPU copy halves GPU load.
@@ -244,12 +441,13 @@ private fun LinuxContainerEditor(
     // Until the user picks one, the first installed runtime is used.
     val selected = runtimes.firstOrNull { it.id == chosenRuntimeId } ?: runtimes.firstOrNull()
     val sizeValid = isValidScreenSize(screenSize.trim())
-    val needsDownload = editing == null && selected == null
+    val needsDownload = steam == null && editing == null && selected == null
     val freeBytes = context.filesDir.usableSpace
     val neededBytes = offered?.let { LinuxRuntimeInstaller.requiredBytes(it) } ?: 0L
     val notEnoughSpace = needsDownload && offered != null && offered!!.size > 0 && freeBytes < neededBytes
     val busy = creating || install.running || waitingForRuntime
-    val canSave = name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
+    val canSave = if (steam != null) editing != null && !busy else name.isNotBlank() && sizeValid && !busy && !notEnoughSpace
+    var confirmReset by remember { mutableStateOf(false) }
 
     LaunchedEffect(needsDownload) {
         if (needsDownload && offered == null) {
@@ -263,8 +461,10 @@ private fun LinuxContainerEditor(
 
     /** Writes everything the editor shows into the container (the caller saves it). */
     fun apply(container: Container) {
-        container.setName(name.trim())
-        container.setScreenSize(screenSize.trim())
+        if (steam == null) {
+            container.setName(name.trim())
+            container.setScreenSize(screenSize.trim())
+        }
         if (selected != null) container.setLinuxRuntime(selected.id)
         container.setEnvVars(envVars.trim())
         container.setCPUList(
@@ -284,15 +484,12 @@ private fun LinuxContainerEditor(
         container.putExtra(LinuxEmulator.EXTRA_ROOTFS, if (emulator == LinuxEmulator.FEX) (rootfsList.firstOrNull { it.id == rootfsId } ?: rootfsList.firstOrNull())?.id ?: "" else "")
         container.putExtra(LinuxEmulator.EXTRA_FEX_PRESET, fexPreset)
         container.putExtra(LinuxEmulator.EXTRA_FEX_THUNKS, if (fexThunks) "1" else "0")
-        container.putExtra(LinuxSession.EXTRA_STEAM, if (startSteam) "1" else "0")
-        container.putExtra(LinuxSession.EXTRA_STEAM_BIG_PICTURE, if (steamBigPicture) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_TOUCHSCREEN, if (touchscreen) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_KEYBOARD_BUTTON, if (keyboardButton) "1" else "0")
         container.putExtra(LinuxSession.EXTRA_AUTO_KEYBOARD, if (autoKeyboard) "1" else "0")
         container.putExtra("graphicsFpsPreset", fpsIndex.toString())
         container.putExtra("hudMode", hudMode.toString())
         container.putExtra("graphicsFilterMode", upscaler)
-        ContainerManager.syncSteamShortcut(container, startSteam)
     }
 
     fun save() {
@@ -365,8 +562,8 @@ private fun LinuxContainerEditor(
     } ?: "Off"
     val envCount = envVars.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
 
-    val categories = listOf(
-        EditorCategory("general", "General", name.ifBlank { "Unnamed" }, name.isBlank()) {
+    val categories = listOfNotNull(
+        if (steam != null) null else EditorCategory("general", "General", name.ifBlank { "Unnamed" }, name.isBlank()) {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -421,22 +618,6 @@ private fun LinuxContainerEditor(
                         runtimes.associateTo(LinkedHashMap<String, String>()) { it.id to it.name }
                     ) { chosenRuntimeId = it }
                 }
-                SettingsDivider()
-                SettingToggle("Start the Steam client with the container", startSteam) { startSteam = it }
-                SettingsDivider()
-                SettingToggle("Steam in Big Picture mode (fills the screen)", steamBigPicture) { steamBigPicture = it }
-                Text(
-                    "Steam's desktop window is about 1280x800 and does not fit a smaller screen; Big Picture is its full-screen " +
-                        "interface and is made for touch. A larger resolution (or Native) also fits the desktop window.",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "Starts the runtime's Steam client beside the game. The first start downloads it (1-2 minutes); its log is Winlator/logs/linux-steam.log.",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         },
         EditorCategory("emulation", "x86 emulation (Box64 / FEX)", emulatorSummary, emulatorProblem) {
@@ -511,7 +692,14 @@ private fun LinuxContainerEditor(
             !sizeValid
         ) {
             SettingsCard {
-                ResolutionSetting(screenSize) { screenSize = it }
+                if (steam == null) ResolutionSetting(screenSize) { screenSize = it }
+                else Text(
+                    "Native resolution and Big Picture: Steam always runs at the device's own size, in its full-screen interface. " +
+                        "The games it starts choose their own mode, or the one set for them in Steam.",
+                    modifier = Modifier.padding(14.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 SettingsDivider()
                 SettingToggle("Fit to screen (keep proportions)", stretched) { stretched = it }
                 SettingsDivider()
@@ -625,22 +813,37 @@ private fun LinuxContainerEditor(
     }
     val saveButton: @Composable () -> Unit = {
         Button(onClick = ::save, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
-            Text(if (editing != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
+            Text(if (editing != null || steam != null) "Save" else if (needsDownload) "Download runtime and create" else "Create")
         }
+    }
+    val resetButton: @Composable () -> Unit = {
+        if (steam != null && editing != null) {
+            OutlinedButton(onClick = { confirmReset = true }, modifier = Modifier.fillMaxWidth()) { Text("Reset Steam") }
+        }
+    }
+    if (confirmReset && steam != null) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Reset Steam?") },
+            text = { Text("Steam's container is deleted with everything in it (the sign-in, the downloaded games) and made again from the defaults.") },
+            confirmButton = { TextButton(onClick = { confirmReset = false; steam.onReset() }) { Text("Reset") } },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
+        )
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (editing != null) "Edit Linux container" else "New Linux container") },
+                title = { Text(if (steam != null) "Steam" else if (editing != null) "Edit Linux container" else "New Linux container") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            GroupedSettings(categories) {
+            GroupedSettings(categories, header = steam?.header, enabled = steam?.ready != false) {
                 problems()
                 saveButton()
+                resetButton()
             }
         }
     }

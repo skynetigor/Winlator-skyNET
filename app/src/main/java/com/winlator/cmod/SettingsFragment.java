@@ -14,6 +14,8 @@ import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.telecom.Call;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -28,6 +30,7 @@ import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.SeekBar;
+import android.widget.Toast;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -471,8 +474,42 @@ public class SettingsFragment extends Fragment {
                 preferences.getBoolean("enable_custom_api_key", false),
                 preferences.getString("custom_api_key", ""),
                 preferences.getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES),
-                wineDebugOptions
+                wineDebugOptions,
+                steamSummary(context),
+                steamReady(context),
+                gameProfilesSummary(context)
         );
+    }
+
+    private static boolean steamReady(Context context) {
+        return com.winlator.cmod.steam.SteamContainer.find(new com.winlator.cmod.container.ContainerManager(context)) != null;
+    }
+
+    private static String steamSummary(Context context) {
+        com.winlator.cmod.container.Container steam =
+                com.winlator.cmod.steam.SteamContainer.find(new com.winlator.cmod.container.ContainerManager(context));
+        if (steam == null) {
+            return com.winlator.cmod.steam.SteamContainer.componentsReady(context, com.winlator.cmod.steam.SteamContainer.defaults(context, false))
+                    ? "Ready to be set up" : "Components to download";
+        }
+        int games = com.winlator.cmod.steam.SteamContainer.gameCount(steam);
+        return "Ready · " + (games == 0 ? "no games installed" : games == 1 ? "1 game" : games + " games");
+    }
+
+    /** Where the registry's game profiles came from the last time they were looked up: the network, the saved copy or the app's own. */
+    private static String gameProfilesSummary(Context context) {
+        com.winlator.cmod.contents.RegistryCache.Result result =
+                com.winlator.cmod.contents.RegistryCache.load(context, "games.json", com.winlator.cmod.contents.RegistryCache.TTL_INDEX, false);
+        String source;
+        switch (result.source) {
+            case NETWORK: source = "downloaded"; break;
+            case CACHE: case MEMORY: source = "saved copy"; break;
+            case STALE_CACHE: source = "old saved copy"; break;
+            case BUNDLED: source = "copy in the app"; break;
+            default: source = "not available"; break;
+        }
+        String when = result.time > 0 ? " · " + android.text.format.DateUtils.getRelativeTimeSpanString(result.time) : "";
+        return "Registry branch " + com.winlator.cmod.contents.RegistryCache.branch() + " · " + source + when;
     }
 
     private String resolveStoredPath(String key, String fallback) {
@@ -485,6 +522,39 @@ public class SettingsFragment extends Fragment {
 
     private SettingsCallbacks createComposeCallbacks() {
         return new SettingsCallbacks() {
+            @Override
+            public void onOpenSteam() {
+                Intent intent = new Intent(requireContext(), com.winlator.cmod.ui.settings.ContainersSettingsActivity.class);
+                intent.putExtra(com.winlator.cmod.ui.settings.ContainersSettingsActivity.EXTRA_START, "steam");
+                startActivity(intent);
+            }
+
+            @Override
+            public void onRefreshGameProfiles() {
+                Context appContext = requireContext().getApplicationContext();
+                Toast.makeText(appContext, "Refreshing game profiles…", Toast.LENGTH_SHORT).show();
+                new Thread(() -> {
+                    // The index first, then the file of every game in it, each asked of the network.
+                    boolean ok = com.winlator.cmod.contents.RegistryCache.load(appContext, com.winlator.cmod.gameprofile.GameProfileCatalog.INDEX,
+                            com.winlator.cmod.contents.RegistryCache.TTL_NONE, true).source == com.winlator.cmod.contents.RegistryCache.Source.NETWORK;
+                    for (com.winlator.cmod.gameprofile.GameProfileCatalog.IndexEntry entry : com.winlator.cmod.gameprofile.GameProfileCatalog.index(appContext, false)) {
+                        com.winlator.cmod.gameprofile.GameProfileCatalog.game(appContext, entry.id, true, com.winlator.cmod.contents.RegistryCache.TTL_NONE);
+                    }
+                    final boolean downloaded = ok;
+                    new Handler(Looper.getMainLooper()).post(() -> {
+                        Toast.makeText(appContext, downloaded ? "Game profiles are up to date" : "Could not reach the registry; the saved copies stay", Toast.LENGTH_SHORT).show();
+                        if (isAdded()) refreshCompose();
+                    });
+                }).start();
+            }
+
+            @Override
+            public void onClearRegistryCache() {
+                com.winlator.cmod.contents.RegistryCache.clear(requireContext());
+                Toast.makeText(requireContext(), "Saved copies removed; the copy in the app is used until the next download", Toast.LENGTH_LONG).show();
+                refreshCompose();
+            }
+
             @Override
             public void onOpenComponents() {
                 Intent intent = new Intent(requireContext(), OnboardingActivity.class);

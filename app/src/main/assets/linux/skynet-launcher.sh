@@ -29,4 +29,20 @@ if [ "$SKY_GAME_GL" = zink ]; then
     export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink
     unset LIBGL_ALWAYS_SOFTWARE
 fi
+# A game that ships mimalloc (BeamNG) has it take over malloc and free for the whole process, which Box64 cannot follow: a block
+# mimalloc allocated reaches glibc's free and the game dies at once ("free(): invalid size"). The app preloads a stand-in for
+# the game's own copy when it starts the program itself (LinuxSession.guestEnv); this does the same for a game the client starts.
+if [ -n "$SKY_MIMALLOC_STUB" ] && [ -f "$SKY_MIMALLOC_STUB" ]; then
+    for word in "${cmd[@]}"; do
+        case "$word" in
+            /*) if [ -f "$(dirname "$word")/libmimalloc.so.3" ]; then
+                    case ":$BOX64_LD_PRELOAD:" in
+                        *":$SKY_MIMALLOC_STUB:"*) ;;
+                        *) export BOX64_LD_PRELOAD="${BOX64_LD_PRELOAD:+$BOX64_LD_PRELOAD:}$SKY_MIMALLOC_STUB" ;;
+                    esac
+                    break
+                fi ;;
+        esac
+    done
+fi
 exec "${cmd[@]}" >> "$log" 2>&1

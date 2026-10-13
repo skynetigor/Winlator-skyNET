@@ -48,6 +48,11 @@ public final class LinuxRuntime {
                 && new File(root, "opt/android-host/proot").exists();
     }
 
+    /** True when at least one Linux runtime is installed. */
+    public static boolean anyInstalled(Context context) {
+        return !listInstalled(context).isEmpty();
+    }
+
     /** Installed runtimes, newest name first. Also moves a step-1 {@code files/linuxfs} into place. */
     public static synchronized List<Installed> listInstalled(Context context) {
         migrateLegacy(context);

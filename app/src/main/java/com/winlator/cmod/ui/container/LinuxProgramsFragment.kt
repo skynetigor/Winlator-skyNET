@@ -65,9 +65,15 @@ import com.winlator.cmod.container.Container
 import com.winlator.cmod.container.ContainerManager
 import com.winlator.cmod.core.Callback
 import com.winlator.cmod.core.FileUtils
+import com.winlator.cmod.gameprofile.GameProfile
+import com.winlator.cmod.gameprofile.GameProfileCatalog
+import com.winlator.cmod.gameprofile.GameProfiles
 import com.winlator.cmod.linux.LinuxEmulator
 import com.winlator.cmod.linux.LinuxSession
+import com.winlator.cmod.ui.settings.SettingMappedChoice
 import com.winlator.cmod.ui.theme.WinZTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -110,7 +116,56 @@ class LinuxProgramsFragment : Fragment() {
 private data class LinuxProgram(val name: String, val path: String, val file: File)
 
 /** A program whose name is taken by another shortcut of the container, waiting for the user to name it. */
-private data class NameClash(val name: String, val path: String)
+private data class NameClash(val name: String, val path: String, val extras: Map<String, String>? = null)
+
+/** The registry's game (and the version of it, "" to recognise it) a new program is added with; empty is none. */
+private data class ProfileChoice(val gameId: String = "", val versionId: String = "")
+
+/**
+ * Picks a game of the registry for a program that is being added, and its version. [onProfile] is told the game's profile once it
+ * is read (null for none), so the dialog can show what the program will be.
+ */
+@Composable
+private fun ProfilePicker(
+    games: List<GameProfileCatalog.IndexEntry>,
+    choice: ProfileChoice,
+    onChoice: (ProfileChoice) -> Unit,
+    onProfile: (GameProfile?) -> Unit
+) {
+    val context = LocalContext.current
+    var profile by remember(choice.gameId) { mutableStateOf<GameProfile?>(null) }
+    LaunchedEffect(choice.gameId) {
+        profile = if (choice.gameId.isEmpty()) null else withContext(Dispatchers.IO) {
+            GameProfileCatalog.game(context, choice.gameId, false) ?: GameProfileCatalog.game(context, choice.gameId, true)
+        }
+        onProfile(profile)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SettingMappedChoice(
+            "Game profile",
+            choice.gameId,
+            LinkedHashMap<String, String>().apply {
+                put("", "None")
+                games.forEach { put(it.id, it.name) }
+            }
+        ) { onChoice(ProfileChoice(it, "")) }
+        profile?.let { current ->
+            SettingMappedChoice(
+                "Version",
+                choice.versionId,
+                LinkedHashMap<String, String>().apply {
+                    put("", "Recognise it")
+                    current.versions.forEach { put(it.id, it.label) }
+                }
+            ) { onChoice(choice.copy(versionId = it)) }
+            Text(
+                "The profile sets the program's arguments, the resolution and what works for this version of the game.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
 /** A folder name that does not exist in [parent] yet: [name], or [name]-2, [name]-3 and so on. */
 private fun freeFolder(parent: File, name: String): File {
@@ -185,6 +240,13 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     val main = remember { Handler(Looper.getMainLooper()) }
 
     var tick by remember { mutableIntStateOf(0) }
+    // The registry's games for the "Game profile" choice: what is on hand at once, then what the network has.
+    var games by remember { mutableStateOf<List<GameProfileCatalog.IndexEntry>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        games = withContext(Dispatchers.IO) { GameProfileCatalog.index(context, false) }
+        games = withContext(Dispatchers.IO) { GameProfileCatalog.index(context, true) }
+    }
+    var pendingDirect by remember { mutableStateOf<File?>(null) }
     val programs = remember(tick) { readPrograms(container) }
     var menuOpen by remember { mutableStateOf(false) }
     var pathDialog by remember { mutableStateOf(false) }
@@ -208,12 +270,39 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         }.start()
     }
 
+    /**
+     * The game whose profile names this program as its executable (the path ends with it), for a program picked from storage: the
+     * registry knows BeamNG's is BinLinux/BeamNG.drive.x64, so a file picked there is that game.
+     */
+    fun detectChoice(path: String): ProfileChoice {
+        for (entry in games) {
+            val profile = GameProfileCatalog.game(context, entry.id, false) ?: continue
+            val executable = profile.defaults.executable
+            if (executable != null && path.endsWith("/$executable")) return ProfileChoice(entry.id, "")
+        }
+        return ProfileChoice()
+    }
+
+    /** What a program added with this profile starts with: the profile, the version, and the game's folder worked out from the path. */
+    fun profileExtras(path: String, choice: ProfileChoice?): Map<String, String>? {
+        if (choice == null || choice.gameId.isEmpty()) return null
+        val profile = GameProfileCatalog.game(context, choice.gameId, false)
+        val executable = profile?.effective(profile.version(choice.versionId))?.executable
+        val root = if (executable != null && path.endsWith("/$executable")) path.removeSuffix("/$executable") else ""
+        return mapOf(
+            GameProfiles.EXTRA_PROFILE to choice.gameId,
+            GameProfiles.EXTRA_VERSION to choice.versionId,
+            GameProfiles.EXTRA_ROOT to root
+        )
+    }
+
     /** Adds the shortcut, or asks for another name when this one is taken: two games can share an executable's name. */
-    fun addProgram(name: String, path: String) {
+    fun addProgram(name: String, path: String, choice: ProfileChoice? = null) {
+        val extras = profileExtras(path, choice)
         if (ContainerManager.linuxShortcutExists(container, name)) {
-            nameClash = NameClash(name, path)
+            nameClash = NameClash(name, path, extras)
         } else {
-            ContainerManager.addLinuxShortcut(container, name, path)
+            ContainerManager.addLinuxShortcut(container, name, path, extras)
             tick++
         }
     }
@@ -250,7 +339,8 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         if (LinuxSession.elfMachine(file) == 62 && LinuxEmulator.choice(container) == LinuxEmulator.BOX64) {
             // Box64 reads an x86-64 program instead of mapping it, so it can stay on shared storage. FEX maps the program
             // and its libraries into memory as executable, which shared storage refuses: they are copied like ARM64 ones.
-            addProgram(file.nameWithoutExtension, file.path)
+            if (detectChoice(file.path).gameId.isNotEmpty()) pendingDirect = file
+            else addProgram(file.nameWithoutExtension, file.path)
             return@rememberLauncherForActivityResult
         }
         // Shared storage cannot execute programs, so the program's folder is copied into the container first.
@@ -374,13 +464,31 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
     if (pathDialog) {
         var name by remember { mutableStateOf("") }
         var path by remember { mutableStateOf("/usr/bin/") }
+        var choice by remember { mutableStateOf(ProfileChoice()) }
+        var profile by remember { mutableStateOf<GameProfile?>(null) }
+        // With a game profile the path is the game's folder and the program is the profile's executable inside it.
+        val executable = profile?.effective(profile?.version(choice.versionId))?.executable
+        val finalPath = if (choice.gameId.isNotEmpty() && executable != null) path.trim().trimEnd('/') + "/" + executable else path.trim()
         val valid = path.startsWith("/") && path.length > 1
         AlertDialog(
             onDismissRequest = { pathDialog = false },
             title = { Text("Program in the Linux system") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(path, { path = it }, label = { Text("Path") }, singleLine = true)
+                    ProfilePicker(games, choice, { choice = it }) { profile = it }
+                    OutlinedTextField(
+                        path, { path = it },
+                        label = { Text(if (choice.gameId.isEmpty()) "Path" else "Game folder") },
+                        placeholder = { if (choice.gameId.isNotEmpty()) Text("/root/programs/the_game") },
+                        singleLine = true
+                    )
+                    if (choice.gameId.isNotEmpty() && executable != null) {
+                        Text(
+                            "Program: $finalPath",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     OutlinedTextField(
                         name, { name = it },
                         label = { Text("Name (optional)") }, singleLine = true
@@ -389,11 +497,34 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = valid, onClick = {
-                    addProgram(name.trim().ifEmpty { File(path.trim()).name }, path.trim())
+                    val defaultName = if (choice.gameId.isNotEmpty()) profile?.name ?: File(finalPath).name else File(finalPath).name
+                    addProgram(name.trim().ifEmpty { defaultName }, finalPath, choice)
                     pathDialog = false
                 }) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { pathDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    pendingDirect?.let { file ->
+        // A program on storage that is a game of the registry (Box64 runs it where it is): add it with the game's profile, or without.
+        var choice by remember(file) { mutableStateOf(detectChoice(file.path)) }
+        AlertDialog(
+            onDismissRequest = { pendingDirect = null },
+            title = { Text("Add \"${file.nameWithoutExtension}\"") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("This looks like a game the registry has a profile for.")
+                    ProfilePicker(games, choice, { choice = it }) { }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDirect = null
+                    addProgram(file.nameWithoutExtension, file.path, choice)
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDirect = null }) { Text("Cancel") } }
         )
     }
 
@@ -403,6 +534,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
         // finds it from the program's path, so the folder alone is not always enough: the game's folder can be copied too.
         // Its virtual file system does not follow symbolic links, so a link back to the data on shared storage will not do.
         val gameFolder = folder.parentFile?.takeIf { folder != file && it.parentFile != null && it.name.isNotEmpty() }
+        var copyChoice by remember(file, games) { mutableStateOf(detectChoice(file.path)) }
         var gameSize by remember(file) { mutableStateOf<Long?>(null) }
         LaunchedEffect(file) {
             if (gameFolder != null) {
@@ -427,7 +559,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 main.post {
                     copying = false
                     if (ok) {
-                        addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/$programInside${file.name}")
+                        addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/$programInside${file.name}", copyChoice)
                     } else {
                         Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
                     }
@@ -462,7 +594,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
                 if (!ok) FileUtils.delete(target)
                 main.post {
                     copying = false
-                    if (ok) addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/${programFolder.name}/${file.name}")
+                    if (ok) addProgram(file.nameWithoutExtension, "/root/programs/${target.name}/${programFolder.name}/${file.name}", copyChoice)
                     else Toast.makeText(context, "Copying failed", Toast.LENGTH_LONG).show()
                 }
             }
@@ -472,12 +604,15 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             onDismissRequest = { pendingCopy = null },
             title = { Text("Copy into the container?") },
             text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "Programs cannot run from shared storage, so the folder \"${folder.name}\" " +
                         "(${formatSize(pendingCopySize)}) will be copied into this container." +
                         if (gameFolder != null) "\n\nIf the game keeps its data next to this folder, copy the whole game folder \"${gameFolder.name}\" " +
                             "(${gameSize?.let { formatSize(it) } ?: "measuring..."}) instead, or only the program and read the rest from storage." else ""
                 )
+                    ProfilePicker(games, copyChoice, { copyChoice = it }) { }
+                }
             },
             confirmButton = {
                 Column(horizontalAlignment = Alignment.End) {
@@ -557,7 +692,7 @@ private fun LinuxProgramsScreen(containerId: Int, pickOnOpen: Boolean, onBack: (
             },
             confirmButton = {
                 TextButton(enabled = newName.isNotBlank() && !taken, onClick = {
-                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path)
+                    ContainerManager.addLinuxShortcut(container, newName.trim(), clash.path, clash.extras)
                     nameClash = null
                     tick++
                 }) { Text("Add") }

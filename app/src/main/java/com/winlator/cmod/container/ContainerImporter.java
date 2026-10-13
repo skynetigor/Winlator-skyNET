@@ -583,6 +583,10 @@ public final class ContainerImporter {
             JSONObject extra = data.optJSONObject("extraData");
             if (extra == null) extra = new JSONObject();
             data.put("extraData", extra);
+            // There is one Steam container and the app makes it itself: a profile cannot bring another, or Steam's old per-container options.
+            extra.remove(com.winlator.cmod.steam.SteamContainer.EXTRA_MANAGED);
+            extra.remove("linuxSteam");
+            extra.remove("linuxSteamBigPicture");
 
             String driver = extra.optString(com.winlator.cmod.linux.LinuxDriverManager.EXTRA_DRIVER, "");
             if (!driver.isEmpty() && !com.winlator.cmod.linux.LinuxDriverManager.isInstalled(context, driver)) {
@@ -616,7 +620,6 @@ public final class ContainerImporter {
                 warnings.add("Container creation failed.");
                 return new Result(null, warnings);
             }
-            ContainerManager.syncSteamShortcut(created, "1".equals(created.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM)));
             return new Result(created, warnings);
         } catch (Exception e) {
             Log.e(TAG, "Linux container import failed", e);

@@ -1,24 +1,15 @@
 package com.winlator.cmod.ui.container
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -151,123 +142,3 @@ internal fun ResolutionSetting(value: String, defaultLabel: String? = null, onCh
 }
 
 internal const val CUSTOM_RESOLUTION = "custom"
-
-/**
- * The groups of an editor. A wide screen lists them beside the page of the chosen one, with [footer] under the list; a
- * narrow screen stacks them as sections that open and close, with [footer] after the last. The group that needs the
- * user's attention is the one that opens first.
- */
-@Composable
-internal fun GroupedSettings(categories: List<EditorCategory>, footer: @Composable () -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (maxWidth >= WIDE_LAYOUT_WIDTH) {
-            var chosen by rememberSaveable { mutableStateOf(categories.firstOrNull { it.attention }?.id ?: categories.first().id) }
-            val page = categories.firstOrNull { it.id == chosen } ?: categories.first()
-            Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width(280.dp).fillMaxHeight().padding(12.dp)) {
-                    Column(
-                        Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        categories.forEach { category ->
-                            CategoryRow(category, selected = category.id == chosen) { chosen = category.id }
-                        }
-                    }
-                    Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { footer() }
-                }
-                Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
-                Column(
-                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(page.title, style = MaterialTheme.typography.titleLarge)
-                    page.content()
-                }
-            }
-        } else {
-            Column(
-                Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                categories.forEach { category -> CollapsibleSection(category) }
-                footer()
-            }
-        }
-    }
-}
-
-/** One group of the editor: its name, a line saying how it is set, and its page. */
-internal class EditorCategory(
-    val id: String,
-    val title: String,
-    val summary: String,
-    val attention: Boolean,
-    val content: @Composable () -> Unit
-)
-
-internal val WIDE_LAYOUT_WIDTH = 720.dp
-
-@Composable
-internal fun CategoryRow(category: EditorCategory, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Text(
-                category.title,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                category.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2
-            )
-        }
-    }
-}
-
-@Composable
-internal fun CollapsibleSection(category: EditorCategory) {
-    var expanded by rememberSaveable(category.id) { mutableStateOf(category.attention) }
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            Surface(onClick = { expanded = !expanded }, color = MaterialTheme.colorScheme.surface) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            category.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (category.attention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            category.summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2
-                        )
-                    }
-                    Icon(if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown, null)
-                }
-            }
-            if (expanded) {
-                Column(
-                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) { category.content() }
-            }
-        }
-    }
-}
-

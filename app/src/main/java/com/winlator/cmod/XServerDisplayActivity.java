@@ -78,6 +78,7 @@ import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.gameprofile.GameProfiles;
 import com.winlator.cmod.linux.LinuxRuntime;
 import com.winlator.cmod.xserver.XClientRequestHandler;
 import com.winlator.cmod.xserver.extensions.DRI3Extension;
@@ -185,6 +186,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private WineInfo wineInfo;
     /** True when the container is a Linux container: the session runs under proot instead of Wine. */
     private boolean linuxSession;
+    /** What the game's registry profile says about the Linux shortcut being run; null when there is none. */
+    private GameProfiles.Effective gameProfile;
     private LinuxRuntime.Installed linuxRuntime;
     private final EnvVars envVars = new EnvVars();
     private boolean firstTimeBoot = false;
@@ -468,11 +471,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
+        // What the game's registry profile says about this shortcut (a Linux one only); the shortcut's own choices win over it.
+        gameProfile = shortcut != null && container.isLinux() ? GameProfiles.resolve(this, container, shortcut) : null;
         // A Linux shortcut's own frame generation settings win over its container's for this session.
         LsfgManager.endSession();
         if (shortcut != null && container.isLinux()) {
-            String shortcutMultiplier = shortcut.getExtra(LsfgManager.EXTRA_MULTIPLIER);
-            String shortcutFlow = shortcut.getExtra(LsfgManager.EXTRA_FLOW_SCALE);
+            String shortcutMultiplier = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_MULTIPLIER);
+            String shortcutFlow = GameProfiles.extra(shortcut, gameProfile, LsfgManager.EXTRA_FLOW_SCALE);
             try {
                 LsfgManager.beginSession(
                         shortcutMultiplier.isEmpty() ? null : Integer.valueOf(shortcutMultiplier),
@@ -548,7 +553,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             emulator = shortcut.getExtra("emulator", container.getEmulator());
             dxwrapper = shortcut.getExtra("dxwrapper", container.getDXWrapper());
             dxwrapperConfig = shortcut.getExtra("dxwrapperConfig", container.getDXWrapperConfig());
-            screenSize = shortcut.getExtra("screenSize", container.getScreenSize());
+            screenSize = linuxSession ? GameProfiles.screenSize(this, container, shortcut, gameProfile)
+                    : shortcut.getExtra("screenSize", container.getScreenSize());
             lc_all = shortcut.getExtra("lc_all", container.getLC_ALL());
             String inputType = shortcut.getExtra("inputType");
             if (!inputType.isEmpty())
@@ -574,7 +580,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (linuxSession) {
             // A Linux program is used by touch: the container says whether a finger acts where it touches (on by default),
             // and a shortcut may say otherwise.
-            String own = shortcut != null ? shortcut.getExtra("simTouchScreen") : "";
+            String own = shortcut != null ? GameProfiles.extra(shortcut, gameProfile, "simTouchScreen") : "";
             simulateTouchScreen = !own.isEmpty() ? own.equals("1") : !"0".equals(container.getExtra(LinuxSession.EXTRA_TOUCHSCREEN));
         }
 
@@ -1576,6 +1582,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         String shortcutFullscreenStretched = shortcut != null ? shortcut.getExtra("fullscreenStretched") : null;
+        // getExtra gives "" for a value that is not there, never null: a Linux shortcut that says nothing follows its profile and then
+        // the container's "Fit to screen".
+        if (shortcut != null && linuxSession && shortcutFullscreenStretched.isEmpty()) {
+            shortcutFullscreenStretched = GameProfiles.extra(shortcut, gameProfile, "fullscreenStretched");
+            if (shortcutFullscreenStretched.isEmpty()) shortcutFullscreenStretched = null;
+        }
 
         boolean shouldStretch = false;
 
@@ -2242,8 +2254,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
 
         String savedFilter = container != null ? container.getExtra("graphicsFilterMode") : "";
-        if (shortcut != null && linuxSession && !shortcut.getExtra("graphicsFilterMode").isEmpty())
-            savedFilter = shortcut.getExtra("graphicsFilterMode");
+        if (shortcut != null && linuxSession && !GameProfiles.extra(shortcut, gameProfile, "graphicsFilterMode").isEmpty())
+            savedFilter = GameProfiles.extra(shortcut, gameProfile, "graphicsFilterMode");
         boolean fsrOn = !savedFilter.isEmpty() && Integer.parseInt(savedFilter) > 0;
         if (swEnableFSR != null) {
             swEnableFSR.setChecked(fsrOn);

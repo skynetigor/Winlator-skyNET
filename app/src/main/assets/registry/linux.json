@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "note": "Catalog of Linux-container packages for Winlator skyNET: x86 emulators and Vulkan (Turnip) drivers built for the Linux runtime (glibc aarch64). The Wine components stay in contents.json.",
+  "emulators": [
+    {
+      "id": "box64-0.4.4",
+      "name": "Box64",
+      "emulator": "box64",
+      "version": "0.4.4",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-box64-0.4.4/box64-0.4.4-linux-aarch64.tar.zst",
+      "sha256": "e2a21c070df993b2910a1a89914ccc5eb365b21329c5c8383a8c99c82e87acbd",
+      "size": 16226615
+    },
+    {
+      "id": "fex-2610",
+      "name": "FEX",
+      "emulator": "fex",
+      "version": "2610",
+      "channel": "prerelease",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-fex-2610/fex-2610-linux-aarch64.tar.zst",
+      "sha256": "a5633ead7d57f327176de618d3cdf622e9a68302bd934051760a4f61114c38c4",
+      "size": 2144270
+    }
+  ],
+  "drivers": [
+    {
+      "id": "turnip-v26.3.0-20261011-710-720-test-linux",
+      "name": "Mesa Turnip v26.3.0-20261011-710-720-Test-Linux",
+      "version": "26.3.0-20261011",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v26.3.0-20261011/Turnip-v26.3.0-20261011-710-720-Test-Linux.zip",
+      "sha256": "1b47f400f2e50dab31bb7ae9c2a827e7d3f0ecb388036cdaf936e06208e10965",
+      "size": 3218619
+    },
+    {
+      "id": "turnip-v26.3.0-20261011-a8xx-linux",
+      "name": "Mesa Turnip v26.3.0-20261011-A8xx-Linux",
+      "version": "26.3.0-20261011",
+      "channel": "prerelease",
+      "source": "The412Banner/Banners-Turnip",
+      "url": "https://github.com/The412Banner/Banners-Turnip/releases/download/v26.3.0-20261011/Turnip-v26.3.0-20261011-A8xx-Linux.zip",
+      "sha256": "6128900326618a13a5905200568717b2e413f93d7ca38f7ff3d0e40e407c0ac6",
+      "size": 3266459
+    }
+  ],
+  "rootfs": [
+    {
+      "id": "rootfs-ubuntu-24-04-2026-08-11",
+      "name": "Ubuntu 24.04 x86-64 root filesystem",
+      "version": "2026-08-11",
+      "channel": "prerelease",
+      "source": "https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh",
+      "url": "https://github.com/skynetigor/winlator-skynet-components/releases/download/linux-rootfs-ubuntu-24-04-2026-08-11/rootfs-ubuntu-24-04-2026-08-11.tar.zst",
+      "sha256": "4853f496688c4fd9885c79cb26628ec278e6a62325cac822061e8835d6aa83b5",
+      "size": 437391543
+    }
+  ],
+  "steam": {
+    "runtime": "bannerlator-r9",
+    "emulator": "box64-0.4.4",
+    "emulatorPreset": "PERFORMANCE",
+    "driver": "turnip-v26.3.0-20261011-a8xx-linux",
+    "glDriver": "zink",
+    "vulkanPresent": "native"
+  }
+}

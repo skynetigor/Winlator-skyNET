@@ -84,6 +84,7 @@ import com.winlator.cmod.core.FileUtils
 import com.winlator.cmod.core.PreloaderDialog
 import com.winlator.cmod.core.StringUtils
 import com.winlator.cmod.linux.LinuxRuntime
+import com.winlator.cmod.steam.SteamContainer
 import com.winlator.cmod.ui.applyAppFullscreen
 import com.winlator.cmod.ui.container.ContainerCreateComposeFragment
 import com.winlator.cmod.ui.container.GameContainerFragment
@@ -134,18 +135,19 @@ class ContainersSettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** Opens the screen for one way of making a container: "windows", "linux", "game" or "import". */
+    /** Opens the screen for one way of making a container: "windows", "linux", "game" or "import"; "steam" opens the Steam settings. */
     fun startContainer(kind: String) {
         when (kind) {
             "windows" -> openFragment(ContainerCreateComposeFragment())
             "linux" -> openFragment(LinuxContainerCreateFragment())
+            "steam" -> openFragment(LinuxContainerCreateFragment.forSteam())
             "game" -> openFragment(GameContainerFragment())
             "import" -> importContainer()
         }
     }
 
     companion object {
-        /** "linux", "game" or "import": the screen to open straight away. */
+        /** "linux", "game", "import" or "steam": the screen to open straight away. */
         const val EXTRA_START = "start"
     }
 
@@ -222,7 +224,8 @@ class ContainersSettingsActivity : AppCompatActivity() {
     private fun editContainer(id: Int) {
         val container = ContainerManager(this).getContainerById(id)
         openFragment(
-            if (container?.isLinux == true) LinuxContainerCreateFragment.forEdit(id)
+            if (SteamContainer.isManaged(container)) LinuxContainerCreateFragment.forSteam()
+            else if (container?.isLinux == true) LinuxContainerCreateFragment.forEdit(id)
             else ContainerCreateComposeFragment.forEdit(id)
         )
     }
@@ -517,8 +520,8 @@ private fun SettingsContainerCard(
                         "Linux • $runtime • ${container.screenSize}"
                     } else "${container.wineVersion} • ${container.screenSize}"
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (container.isLinux && container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM) == "1") {
-                        // A container with the Steam client: a badge and how many games Steam has installed in it.
+                    if (SteamContainer.isManaged(container)) {
+                        // The Steam container: a badge and how many games Steam has installed in it.
                         val games = com.winlator.cmod.linux.LinuxSteamGames.count(container)
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
@@ -555,7 +558,9 @@ private fun SettingsContainerCard(
             ) {
                 ActionButton(Icons.Outlined.Edit, "Edit", Modifier.weight(1f)) { onEdit(container.id) }
                 ActionButton(Icons.Outlined.Info, "Properties", Modifier.weight(1f)) { onProperties(container.id) }
-                ContainerMoreButton(
+                // The Steam container is the app's own: it is reset from its settings, and has nothing to duplicate, remove or export here.
+                if (SteamContainer.isManaged(container)) Spacer(Modifier.weight(1f))
+                else ContainerMoreButton(
                     modifier = Modifier.weight(1f),
                     onDuplicate = { onDuplicate(container.id) },
                     onRemove = { onRemove(container.id) },

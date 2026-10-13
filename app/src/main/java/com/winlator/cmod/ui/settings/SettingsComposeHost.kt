@@ -115,7 +115,12 @@ data class SettingsModel(
     val customApiKeyEnabled: Boolean,
     val customApiKey: String,
     val contentsUrl: String,
-    val wineDebugOptions: List<String>
+    val wineDebugOptions: List<String>,
+    /** One line about Steam ("Ready · 3 games", "Components to download"), and whether its container exists. */
+    val steamSummary: String,
+    val steamReady: Boolean,
+    /** Where the game profiles of the registry came from, for the "Game profiles" group. */
+    val gameProfilesSummary: String
 )
 
 @Stable
@@ -134,6 +139,9 @@ interface SettingsCallbacks {
     fun onWineDebugChannelsChanged(value: String)
     fun onReinstallImageFs()
     fun onPresetAction(kind: String, id: String, action: String)
+    fun onOpenSteam()
+    fun onRefreshGameProfiles()
+    fun onClearRegistryCache()
 }
 
 object SettingsComposeHost {
@@ -175,144 +183,157 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
         }
     }
 
+    // The groups, as in the container editor: listed beside the page of the chosen one when the room allows it, otherwise
+    // stacked as sections that open and close. The settings are written as they are changed, so there is no footer.
+    val categories = listOf(
+        EditorCategory("appearance", "Appearance", "Theme and colours", false) {
+            WinlatorThemePreferenceCard()
+        },
+        EditorCategory("environments", "Environments", "Containers, Steam and components", !model.steamReady) {
+            NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
+                context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
+            }
+            NavigationRow(
+                Icons.Outlined.Memory, "Steam",
+                if (model.steamReady) model.steamSummary else "Not set up yet: ${model.steamSummary}",
+                callbacks::onOpenSteam
+            )
+            NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
+        },
+        EditorCategory(
+            "presets", "Presets",
+            model.box64Presets.firstOrNull { it.id == model.selectedBox64Preset }?.let { "Box64: ${it.name}" } ?: "Box64 and FEXCore",
+            false
+        ) {
+            GroupCard {
+                PresetChoiceRow(
+                    icon = Icons.Outlined.Memory,
+                    title = stringResource(R.string.box64_preset),
+                    choices = model.box64Presets,
+                    selectedId = model.selectedBox64Preset,
+                    kind = "box64",
+                    onSelected = callbacks::onBox64PresetSelected,
+                    onAction = callbacks::onPresetAction
+                )
+                GroupDivider()
+                PresetChoiceRow(
+                    icon = Icons.Outlined.Speed,
+                    title = stringResource(R.string.fexcore_preset),
+                    choices = model.fexPresets,
+                    selectedId = model.selectedFexPreset,
+                    kind = "fexcore",
+                    onSelected = callbacks::onFexPresetSelected,
+                    onAction = callbacks::onPresetAction
+                )
+            }
+        },
+        EditorCategory("sound", stringResource(R.string.sound), "${model.soundFonts.size} SoundFont" + if (model.soundFonts.size == 1) "" else "s", false) {
+            SoundFontCard(model.soundFonts, callbacks::onInstallSoundFont, callbacks::onRemoveSoundFont)
+        },
+        EditorCategory("paths", "Paths", "Winlator folder and shortcut export", false) {
+            NavigationRow(Icons.Outlined.Storage, "Winlator Path", model.winlatorPath, callbacks::onChooseWinlatorPath)
+            NavigationRow(Icons.Outlined.FolderOpen, "Shortcut Export Path", model.shortcutPath, callbacks::onChooseShortcutPath)
+        },
+        EditorCategory(
+            "library", "Library and Big Picture",
+            (if (model.bigPicture) "Big Picture on launch" else "Big Picture off") + (if (model.gameSavesAllShortcuts) " · game saves" else ""),
+            false
+        ) {
+            GroupCard {
+                ToggleRow(
+                    "Game Saves for all shortcuts",
+                    model.gameSavesAllShortcuts,
+                    "Automatically detect and back up saves when any shortcut exits"
+                ) { callbacks.onBooleanChanged("game_saves_all_shortcuts", it) }
+            }
+            GroupCard {
+                ToggleRow("Enable Big Picture Mode on App Launch", model.bigPicture) { callbacks.onBooleanChanged("enable_big_picture_mode", it) }
+                GroupDivider()
+                ToggleRow("Set SteamGrid API Key? (Cover Art)", model.customApiKeyEnabled) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
+            }
+            if (model.customApiKeyEnabled) EditableValueCard("SteamGridDB API Key", model.customApiKey, callbacks::onCustomApiKeyChanged)
+        },
+        EditorCategory("xserver", stringResource(R.string.xserver), "Cursor ${model.cursorSpeedPercent}%" + if (model.useDri3) " · DRI3" else "", false) {
+            GroupCard {
+                CursorSpeedRow(model.cursorSpeedPercent, callbacks::onCursorSpeedChanged)
+                GroupDivider()
+                ToggleRow(stringResource(R.string.use_dri3_extension), model.useDri3) { callbacks.onBooleanChanged("use_dri3", it) }
+                if (model.xrSupported) {
+                    GroupDivider()
+                    ToggleRow(stringResource(R.string.use_xr), model.useXr) { callbacks.onBooleanChanged("use_xr", it) }
+                }
+                GroupDivider()
+                ToggleRow("Capture External Pointer", model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
+                GroupDivider()
+                ToggleRow("Disable Xinput (Used for Exclusive M/KB support)", model.xInput) { callbacks.onBooleanChanged("xinput_toggle", it) }
+            }
+        },
+        EditorCategory(
+            "logs", stringResource(R.string.logs),
+            listOfNotNull("Wine".takeIf { model.wineDebug }, "Winlator".takeIf { model.winlatorLogs }, "Box64".takeIf { model.box64Logs })
+                .joinToString(" · ").ifEmpty { "Off" },
+            false
+        ) {
+            GroupCard {
+                ToggleRow(stringResource(R.string.enable_wine_debug), model.wineDebug) { callbacks.onBooleanChanged("enable_wine_debug", it) }
+                if (model.wineDebug) {
+                    GroupDivider()
+                    WineDebugChannelsRow(
+                        selectedValue = model.wineDebugChannels,
+                        options = model.wineDebugOptions,
+                        onSave = callbacks::onWineDebugChannelsChanged
+                    )
+                }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.enable_winlator_logs), model.winlatorLogs) { callbacks.onBooleanChanged("enable_winlator_logs", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.enable_box64_logs), model.box64Logs) { callbacks.onBooleanChanged("enable_box64_logs", it) }
+            }
+        },
+        EditorCategory("profiles", "Game profiles", model.gameProfilesSummary, false) {
+            GroupCard {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(model.gameProfilesSummary, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "A game profile from the registry says how to start a game and what works for each version of it: the program, the " +
+                            "arguments (such as -nosteam) and the resolution. Shortcuts follow it until you change them. The files are kept " +
+                            "for offline use; a copy comes with the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = callbacks::onRefreshGameProfiles) { Text("Refresh") }
+                        TextButton(onClick = callbacks::onClearRegistryCache) { Text("Clear the saved copies") }
+                    }
+                }
+            }
+        },
+        EditorCategory("experimental", stringResource(R.string.experimental), "Clipboard, browser, refresh rate and more", false) {
+            GroupCard {
+                ToggleRow(stringResource(R.string.enable_file_provider), model.fileProvider) { callbacks.onBooleanChanged("enable_file_provider", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.open_with_android_browser), model.openInBrowser) { callbacks.onBooleanChanged("open_with_android_browser", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.share_android_clipboard), model.shareClipboard) { callbacks.onBooleanChanged("share_android_clipboard", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.pause_resume_wine), model.pauseWine) { callbacks.onBooleanChanged("pause_resume_wine", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.high_refresh_rate), model.highRefreshRate) { callbacks.onBooleanChanged("high_refresh_rate_mode", it) }
+                GroupDivider()
+                ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
+            }
+            EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged)
+        },
+        EditorCategory("system", "System", "ImageFS and about", false) {
+            NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs)
+            NavigationRow(Icons.Outlined.Info, "About", null) { activity?.showAboutDialog() }
+        }
+    )
+
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (landscape) LandscapeMainNavigation(activity, R.id.main_menu_settings, "Settings")
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 30.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            item("appearance-title") { SectionTitle("APPEARANCE") }
-            item("theme") { WinlatorThemePreferenceCard() }
-
-            item("environment-title") { SectionTitle("ENVIRONMENTS") }
-            item("containers") {
-                NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
-                    context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
-                }
-            }
-            item("components") {
-                NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
-            }
-
-            item("presets-title") { SectionTitle("PRESETS") }
-            item("presets") {
-                GroupCard {
-                    PresetChoiceRow(
-                        icon = Icons.Outlined.Memory,
-                        title = stringResource(R.string.box64_preset),
-                        choices = model.box64Presets,
-                        selectedId = model.selectedBox64Preset,
-                        kind = "box64",
-                        onSelected = callbacks::onBox64PresetSelected,
-                        onAction = callbacks::onPresetAction
-                    )
-                    GroupDivider()
-                    PresetChoiceRow(
-                        icon = Icons.Outlined.Speed,
-                        title = stringResource(R.string.fexcore_preset),
-                        choices = model.fexPresets,
-                        selectedId = model.selectedFexPreset,
-                        kind = "fexcore",
-                        onSelected = callbacks::onFexPresetSelected,
-                        onAction = callbacks::onPresetAction
-                    )
-                }
-            }
-
-            item("sound-title") { SectionTitle(stringResource(R.string.sound)) }
-            item("soundfonts") {
-                SoundFontCard(model.soundFonts, callbacks::onInstallSoundFont, callbacks::onRemoveSoundFont)
-            }
-
-            item("paths-title") { SectionTitle("PATH SETTINGS") }
-            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, "Winlator Path", model.winlatorPath, callbacks::onChooseWinlatorPath) }
-            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, "Shortcut Export Path", model.shortcutPath, callbacks::onChooseShortcutPath) }
-
-            item("game-saves-title") { SectionTitle("GAME SAVES") }
-            item("game-saves") {
-                GroupCard {
-                    ToggleRow(
-                        "Game Saves for all shortcuts",
-                        model.gameSavesAllShortcuts,
-                        "Automatically detect and back up saves when any shortcut exits"
-                    ) { callbacks.onBooleanChanged("game_saves_all_shortcuts", it) }
-                }
-            }
-
-            item("big-picture-title") { SectionTitle("BIG PICTURE MODE") }
-            item("big-picture") {
-                GroupCard {
-                    ToggleRow("Enable Big Picture Mode on App Launch", model.bigPicture) { callbacks.onBooleanChanged("enable_big_picture_mode", it) }
-                    GroupDivider()
-                    ToggleRow("Set SteamGrid API Key? (Cover Art)", model.customApiKeyEnabled) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
-                }
-            }
-            if (model.customApiKeyEnabled) {
-                item("api-key") { EditableValueCard("SteamGridDB API Key", model.customApiKey, callbacks::onCustomApiKeyChanged) }
-            }
-
-            item("xserver-title") { SectionTitle(stringResource(R.string.xserver)) }
-            item("xserver") {
-                GroupCard {
-                    CursorSpeedRow(model.cursorSpeedPercent, callbacks::onCursorSpeedChanged)
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.use_dri3_extension), model.useDri3) { callbacks.onBooleanChanged("use_dri3", it) }
-                    if (model.xrSupported) {
-                        GroupDivider()
-                        ToggleRow(stringResource(R.string.use_xr), model.useXr) { callbacks.onBooleanChanged("use_xr", it) }
-                    }
-                    GroupDivider()
-                    ToggleRow("Capture External Pointer", model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
-                    GroupDivider()
-                    ToggleRow("Disable Xinput (Used for Exclusive M/KB support)", model.xInput) { callbacks.onBooleanChanged("xinput_toggle", it) }
-                }
-            }
-
-            item("logs-title") { SectionTitle(stringResource(R.string.logs)) }
-            item("logs") {
-                GroupCard {
-                    ToggleRow(stringResource(R.string.enable_wine_debug), model.wineDebug) { callbacks.onBooleanChanged("enable_wine_debug", it) }
-                    if (model.wineDebug) {
-                        GroupDivider()
-                        WineDebugChannelsRow(
-                            selectedValue = model.wineDebugChannels,
-                            options = model.wineDebugOptions,
-                            onSave = callbacks::onWineDebugChannelsChanged
-                        )
-                    }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.enable_winlator_logs), model.winlatorLogs) { callbacks.onBooleanChanged("enable_winlator_logs", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.enable_box64_logs), model.box64Logs) { callbacks.onBooleanChanged("enable_box64_logs", it) }
-                }
-            }
-
-            item("experimental-title") { SectionTitle(stringResource(R.string.experimental)) }
-            item("experimental") {
-                GroupCard {
-                    ToggleRow(stringResource(R.string.enable_file_provider), model.fileProvider) { callbacks.onBooleanChanged("enable_file_provider", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.open_with_android_browser), model.openInBrowser) { callbacks.onBooleanChanged("open_with_android_browser", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.share_android_clipboard), model.shareClipboard) { callbacks.onBooleanChanged("share_android_clipboard", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.pause_resume_wine), model.pauseWine) { callbacks.onBooleanChanged("pause_resume_wine", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.high_refresh_rate), model.highRefreshRate) { callbacks.onBooleanChanged("high_refresh_rate_mode", it) }
-                    GroupDivider()
-                    ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
-                }
-            }
-            item("contents-url") { EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged) }
-
-            item("imagefs-title") { SectionTitle(stringResource(R.string.imagefs)) }
-            item("imagefs") { NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs) }
-
-            item("about-title") { SectionTitle("ABOUT") }
-            item("about") {
-                NavigationRow(Icons.Outlined.Info, "About", null) { activity?.showAboutDialog() }
-            }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            GroupedSettings(categories)
         }
     }
 }

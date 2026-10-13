@@ -7,6 +7,7 @@ import android.util.Log;
 import com.winlator.cmod.container.Container;
 import com.winlator.cmod.core.EnvVars;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.gameprofile.GameProfiles;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
 
@@ -40,12 +41,8 @@ public final class LinuxSession {
     public static final String EXTRA_VULKAN_PRESENT = "linuxVulkanPresent";
     /** Container extra: "software" (default, llvmpipe) or "zink" (OpenGL on the Turnip Vulkan driver). */
     public static final String EXTRA_GL_DRIVER = "linuxGlDriver";
-    /** "1" when the Steam client is started with the container. */
-    public static final String EXTRA_STEAM = "linuxSteam";
     /** "0" when a finger should not act where it touches (the touchpad way is used); on when absent. */
     public static final String EXTRA_TOUCHSCREEN = "linuxTouchscreen";
-    /** "1": the Steam client of the container opens in Big Picture mode, which fills the screen. */
-    public static final String EXTRA_STEAM_BIG_PICTURE = "linuxSteamBigPicture";
     /** On a Steam game's shortcut: "0" starts the whole Steam client; absent, the client starts without its window. */
     public static final String EXTRA_STEAM_MINIMAL = "steamMinimal";
     /** Container extra: "0" keeps the Steam client's web helper drawing on the CPU; otherwise it draws on the GPU (steam-taskset.sh). */
@@ -88,7 +85,7 @@ public final class LinuxSession {
     }
 
     /** Where a program, given as the guest sees its path, lives on the host (null if it cannot be told). */
-    private static File hostFile(Context context, Container container, String guestPath) {
+    public static File hostFile(Context context, Container container, String guestPath) {
         if (guestPath.startsWith("/root/")) return new File(container.getLinuxHomeDir(), guestPath.substring(6));
         if (guestPath.startsWith("/storage/") || guestPath.startsWith("/data/")) return new File(guestPath);
         LinuxRuntime.Installed runtime = LinuxRuntime.resolve(context, container);
@@ -108,25 +105,47 @@ public final class LinuxSession {
         return programCommand(context, container, path, null);
     }
 
-    /** As above, with the shortcut's launch options (see {@link LinuxLaunchOptions}): its variables, wrapper and arguments. */
+    /**
+     * A shortcut's program, with its launch options (see {@link LinuxLaunchOptions}) laid over what the game's registry profile
+     * says (see {@link GameProfiles}). The Steam client always opens in Big Picture mode. A Steam game whose profile says
+     * "without Steam" runs its own executable straight away; otherwise it is started through the client.
+     */
     public static String[] programCommand(Context context, Container container, com.winlator.cmod.container.Shortcut shortcut) {
-        // A Steam game starts the client without its window unless the shortcut asks for the whole client.
-        boolean minimal = !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL));
-        return programCommand(context, container, shortcut.path, shortcut.getExtra(LinuxLaunchOptions.EXTRA), minimal);
-    }
-
-    public static String[] programCommand(Context context, Container container, String path, String launchOptions) {
-        return programCommand(context, container, path, launchOptions, true);
-    }
-
-    private static String[] programCommand(Context context, Container container, String path, String launchOptions, boolean steamMinimal) {
-        if (isSteam(path)) return steamCommand("", false, "1".equals(container.getExtra(EXTRA_STEAM_BIG_PICTURE)));
+        String path = shortcut.path;
+        if (isSteam(path)) return steamCommand("", false, true);
+        GameProfiles.Effective profile = GameProfiles.resolve(context, container, shortcut);
+        LinuxLaunchOptions own = LinuxLaunchOptions.parse(shortcut.getExtra(LinuxLaunchOptions.EXTRA));
         if (isSteamGame(path)) {
             String appId = steamAppId(path);
             if (!appId.matches("\\d+")) return refusal("Not a Steam game: " + path);
-            return steamCommand(appId, steamMinimal, false);
+            if (profile != null && profile.runsWithoutSteam()) {
+                File program = hostFile(context, container, profile.executableGuest);
+                if (program == null || !program.isFile()) {
+                    return refusal("The game's program " + profile.executableGuest + " is not there. Turn off \"Launch without Steam\" "
+                            + "in the shortcut's settings to start the game through Steam.");
+                }
+                return directCommand(context, container, profile.executableGuest,
+                        LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own));
+            }
+            // A Steam game starts the client without its window unless the shortcut asks for the whole client.
+            return steamCommand(appId, !"0".equals(shortcut.getExtra(EXTRA_STEAM_MINIMAL)), false);
         }
-        LinuxLaunchOptions options = LinuxLaunchOptions.parse(launchOptions);
+        LinuxLaunchOptions options = profile == null ? own : LinuxLaunchOptions.merged(profile.env, profile.programArgs(), own);
+        return directCommand(context, container, path, options);
+    }
+
+    public static String[] programCommand(Context context, Container container, String path, String launchOptions) {
+        if (isSteam(path)) return steamCommand("", false, true);
+        if (isSteamGame(path)) {
+            String appId = steamAppId(path);
+            if (!appId.matches("\\d+")) return refusal("Not a Steam game: " + path);
+            return steamCommand(appId, true, false);
+        }
+        return directCommand(context, container, path, LinuxLaunchOptions.parse(launchOptions));
+    }
+
+    /** A program of the guest, run with these launch options through the container's emulator when it is an x86-64 one. */
+    private static String[] directCommand(Context context, Container container, String path, LinuxLaunchOptions options) {
         String emulatorPath = "";
         int machine = elfMachine(hostFile(context, container, path));
         if (machine == 62) {
@@ -181,7 +200,7 @@ public final class LinuxSession {
         return path != null && path.startsWith(STEAM_GAME_PREFIX) && path.length() > STEAM_GAME_PREFIX.length();
     }
 
-    private static String steamAppId(String path) {
+    public static String steamAppId(String path) {
         return path.substring(STEAM_GAME_PREFIX.length());
     }
 
@@ -474,6 +493,10 @@ public final class LinuxSession {
             // Steam starts a game through Valve's FEX tool, which needs what proot cannot give; this stands in for it.
             File launcher = stageAsset(context, "skynet-launcher.sh");
             if (launcher != null) env.put("SKY_LAUNCHER", launcher.getPath());
+            // The launcher preloads this stub for a game that ships mimalloc (see below), as a program started from a shortcut
+            // gets it here: the Steam client's session does not know the game when it starts.
+            File mimallocStub = stageAsset(context, "libmimalloc.so.3");
+            if (mimallocStub != null) env.put("SKY_MIMALLOC_STUB", mimallocStub.getPath());
             // An emulated program is an x86-64 process, so the session's aarch64 libraries are never loaded into it:
             // the shims it needs are preloaded again, built for that architecture.
             StringBuilder preload = new StringBuilder();

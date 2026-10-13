@@ -1,0 +1,4 @@
+{"schema":1,"id":"shadow-of-the-tomb-raider","name":"Shadow of the Tomb Raider","steam":{"appId":750920,"installDir":"Shadow of the Tomb Raider"},
+ "defaults":{"executable":"ShadowOfTheTombRaider.sh","args":[],"env":{},"resolution":"native","extras":{}},
+ "versions":[
+  {"id":"1.0.3","label":"1.0.3","status":"untested","default":true,"notes":"Feral's Linux build (Vulkan). Starts through Box64; see the notes in docs of the app about the libpci fix."}]}

@@ -68,8 +68,8 @@ private val startOptions = listOf(
     StartOption(
         ContainerStart.Linux, Icons.Outlined.Terminal,
         "Linux system",
-        "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver, the Steam client and x86 games through Box64 or FEX.",
-        "Games that have a Linux build, such as BeamNG.drive, or when you want Steam itself."
+        "A real Linux (Arch Linux ARM) in a sandbox, with its own Vulkan driver and x86 games through Box64 or FEX.",
+        "Games that have a Linux build, such as BeamNG.drive. Steam has its own place in Settings."
     ) { MaterialTheme.colorScheme.tertiary },
     StartOption(
         ContainerStart.Game, Icons.Outlined.SportsEsports,

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1200" viewBox="0 0 2400 1200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5EE7FF"/><stop offset="1" stop-color="#B07CFF"/></linearGradient><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#070B1E"/><stop offset="1" stop-color="#1A1050"/></linearGradient><filter id="blur"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="2400" height="1200" fill="url(#bg)"/>
+<g transform="translate(250 330) scale(.54)">
+<rect width="1024" height="1024" rx="230" fill="#0E1544" stroke="url(#g)" stroke-width="14"/>
+<g stroke="url(#g)" stroke-linecap="round" fill="none"><rect x="262" y="262" width="500" height="500" rx="90" stroke-width="22"/><path d="M 660 395 C 640 300 370 320 370 450 C 370 570 650 470 650 600 C 650 725 380 720 360 610" stroke-width="64"/></g>
+<g fill="#fff"><circle cx="660" cy="395" r="30"/><circle cx="360" cy="610" r="30"/></g></g>
+<text x="880" y="660" font-family="Helvetica Neue, Arial" font-size="240" font-weight="800" fill="#fff" letter-spacing="-6">SkyNet<tspan fill="url(#g)">Emu</tspan></text>
+<text x="888" y="780" font-family="Helvetica Neue, Arial" font-size="46" font-weight="400" fill="#8FA0D8" letter-spacing="12">WINDOWS &amp; LINUX GAMES ON ANDROID</text>
+</svg>

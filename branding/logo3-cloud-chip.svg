@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1200" viewBox="0 0 2400 1200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5EE7FF"/><stop offset="1" stop-color="#B07CFF"/></linearGradient><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#070B1E"/><stop offset="1" stop-color="#1A1050"/></linearGradient><filter id="blur"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="2400" height="1200" fill="url(#bg)"/>
+<g transform="translate(1200 380)">
+<path d="M-300 150 C-420 150 -440 -20 -310 -40 C-300 -190 -90 -220 -30 -110 C60 -250 280 -170 250 -20 C400 -20 410 150 280 150 Z" fill="none" stroke="url(#g)" stroke-width="22" stroke-linejoin="round"/>
+<g stroke="url(#g)" stroke-width="16" stroke-linecap="round"><path d="M-150 150V230M-50 150V230M50 150V230M150 150V230"/></g>
+<g fill="#fff"><circle cx="-150" cy="240" r="16"/><circle cx="-50" cy="240" r="16"/><circle cx="50" cy="240" r="16"/><circle cx="150" cy="240" r="16"/></g>
+<path d="M-60 -60 L-150 40 L-60 40 M60 -60 L150 40 L60 40" stroke="url(#g)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0"/>
+<path d="M60 -80 C20 -120 -80 -100 -80 -50 C-80 0 60 -10 60 40 C60 90 -60 90 -90 55" stroke="url(#g)" stroke-width="34" stroke-linecap="round" fill="none"/>
+</g>
+<text x="1200" y="960" text-anchor="middle" font-family="Helvetica Neue, Arial" font-size="250" font-weight="300" fill="#fff" letter-spacing="14">SKYNET<tspan font-weight="800" fill="url(#g)">EMU</tspan></text>
+</svg>

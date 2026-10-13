@@ -197,19 +197,32 @@ public class ContainerManager {
 
     /** Writes a shortcut for a program at {@code path} (as the guest sees it) into the container's Desktop. */
     public static File addLinuxShortcut(Container container, String name, String path) {
+        return addLinuxShortcut(container, name, path, null);
+    }
+
+    /** As above, with settings the shortcut starts with (its [Extra Data]); an empty value is left out. */
+    public static File addLinuxShortcut(Container container, String name, String path, java.util.Map<String, String> extras) {
         File dir = container.getDesktopDir();
         dir.mkdirs();
         File file = linuxShortcutFile(container, name);
-        FileUtils.writeString(file,
-                "[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
+        StringBuilder text = new StringBuilder("[Desktop Entry]\nName=" + name + "\nExec=" + path + "\nType=Application\ncontainer_id:" + container.id + "\n");
+        if (extras != null) {
+            StringBuilder lines = new StringBuilder();
+            for (java.util.Map.Entry<String, String> entry : extras.entrySet()) {
+                if (entry.getValue() == null || entry.getValue().isEmpty() || entry.getValue().contains("\n")) continue;
+                lines.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+            }
+            if (lines.length() > 0) text.append("\n[Extra Data]\n").append(lines);
+        }
+        FileUtils.writeString(file, text.toString());
         return file;
     }
 
     public static final String STEAM_SHORTCUT = "Steam";
 
     /**
-     * A Linux container that starts the Steam client has a shortcut for it that only the container owns: the shortcut
-     * is written here and removed with the container (or when the option is turned off), never by the user.
+     * The app's Steam container has a shortcut for the Steam client that only the container owns: it is written here while
+     * Steam can run and removed with the container (or when its runtime is gone), never by the user.
      */
     public static void syncSteamShortcut(Container container, boolean enabled) {
         File file = linuxShortcutFile(container, STEAM_SHORTCUT);
@@ -217,6 +230,8 @@ public class ContainerManager {
             if (file.exists() && file.delete()) Log.d("ContainerManager", "Removed the Steam shortcut");
             return;
         }
+        // Written once: what the app saves into it later (when it was last run) must survive the next sync.
+        if (file.isFile()) return;
         file.getParentFile().mkdirs();
         FileUtils.writeString(file, "[Desktop Entry]\nName=" + STEAM_SHORTCUT + "\nExec=" + com.winlator.cmod.linux.LinuxSession.STEAM_PROGRAM
                 + "\nType=Application\ncontainer_id:" + container.id + "\n");
@@ -285,6 +300,8 @@ public class ContainerManager {
 
 
     private void duplicateContainer(Container srcContainer) {
+        // The Steam container is the app's only one: a copy would be a second Steam with the same login and games.
+        if (com.winlator.cmod.steam.SteamContainer.isManaged(srcContainer)) return;
         int id = findNextContainerId();
 
         File dstDir = new File(homeDir, ImageFs.USER + "-" + id);
@@ -324,15 +341,25 @@ public class ContainerManager {
 
 
     private void removeContainer(Container container) {
+        // The Steam container is reset from its own screen, not removed from the list.
+        if (com.winlator.cmod.steam.SteamContainer.isManaged(container)) return;
+        removeManagedContainer(container);
+    }
+
+    /** Removes a container with everything in it, the app's Steam container included (its screen offers "Reset"). */
+    public void removeManagedContainer(Container container) {
         if (FileUtils.delete(container.getRootDir())) containers.remove(container);
     }
 
     public ArrayList<Shortcut> loadShortcuts() {
         ArrayList<Shortcut> shortcuts = new ArrayList<>();
+        // The Steam container appears once its components are installed (and may add itself to the list), and its Steam shortcut
+        // follows its runtime: both are settled before the containers are walked.
+        com.winlator.cmod.steam.SteamContainer.ensure(context, this);
         for (Container container : containers) {
-            // The games installed in a Linux container's Steam are shortcuts that follow Steam.
-            if (container.isLinux() && "1".equals(container.getExtra(com.winlator.cmod.linux.LinuxSession.EXTRA_STEAM)))
-                com.winlator.cmod.linux.LinuxSteamGames.sync(container);
+            // The games installed in the Steam container are shortcuts that follow Steam.
+            if (com.winlator.cmod.steam.SteamContainer.isManaged(container))
+                com.winlator.cmod.linux.LinuxSteamGames.sync(context, container);
             File desktopDir = container.getDesktopDir();
             ArrayList<File> files = new ArrayList<>();
             if (desktopDir.exists())

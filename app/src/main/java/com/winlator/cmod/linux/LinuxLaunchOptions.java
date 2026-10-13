@@ -28,6 +28,20 @@ public final class LinuxLaunchOptions {
 
     private LinuxLaunchOptions() {}
 
+    /**
+     * What a game's profile says laid under what the shortcut says: the variables of both (the shortcut's win), the profile's
+     * arguments and then the shortcut's, and the shortcut's wrapper.
+     */
+    public static LinuxLaunchOptions merged(Map<String, String> profileEnv, List<String> profileArgs, LinuxLaunchOptions own) {
+        LinuxLaunchOptions merged = new LinuxLaunchOptions();
+        merged.env.putAll(profileEnv);
+        merged.env.putAll(own.env);
+        merged.wrapper.addAll(own.wrapper);
+        merged.args.addAll(profileArgs);
+        merged.args.addAll(own.args);
+        return merged;
+    }
+
     public static LinuxLaunchOptions parse(String text) {
         LinuxLaunchOptions options = new LinuxLaunchOptions();
         if (text == null || text.trim().isEmpty()) return options;

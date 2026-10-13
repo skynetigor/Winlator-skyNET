@@ -1,0 +1,10 @@
+{"schema":1,"id":"beamng-drive","name":"BeamNG.drive","steam":{"appId":284160,"installDir":"BeamNG.drive"},
+ "defaults":{"executable":"BinLinux/BeamNG.drive.x64","noSteam":{"default":true,"arg":"-nosteam"},"args":[],"env":{},"resolution":"native","extras":{}},
+ "versions":[
+  {"id":"0.39","label":"0.39.x","status":"works","default":true,"testedOn":"Samsung Galaxy Z Fold8 Ultra (SM-F976B), Box64 0.4.4","notes":"Runs the Linux build. Needs -nosteam; started through Steam it needs the mimalloc stub the app preloads.",
+   "match":{"steamBuildId":{"from":24617469},
+            "versionFile":{"path":"integrity.json","tail":256,"regex":"\"version\":\\s*\"([0-9.]+)\"","from":"0.39","until":"0.40"},
+            "files":[{"path":"BinLinux/BeamNG.drive.x64","size":81273848}]}},
+  {"id":"0.34","label":"0.34.x","status":"works","testedOn":"Samsung Galaxy Z Fold8 Ultra (SM-F976B), Box64 0.4.4","notes":"Linux build of the 0.34 depot.",
+   "match":{"versionFile":{"path":"integrity.json","tail":256,"regex":"\"version\":\\s*\"([0-9.]+)\"","from":"0.34","until":"0.35"},
+            "files":[{"path":"BinLinux/BeamNG.drive.x64","size":51399304}]}}]}
