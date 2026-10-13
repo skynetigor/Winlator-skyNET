@@ -120,7 +120,7 @@ android {
         // Side-by-side install: keeps the upstream Ludashi build and its containers intact.
         // namespace stays com.winlator.cmod so relative manifest class names still resolve.
         applicationId "com.winlator.cmod.dev"
-        manifestPlaceholders = [appLabel: "Winlator skyNET"]
+        manifestPlaceholders = [appLabel: "SkyNetEmu"]
         minSdkVersion 28
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
@@ -162,7 +162,7 @@ android {
             buildConfigField 'String', 'COMPONENTS_BRANCH', "\"${debugComponentsBranch.get()}\""
             minifyEnabled false
             // A separate app next to the release build: its own package, so no data or signature is shared.
-            manifestPlaceholders = [appLabel: "skyNET Debug"]
+            manifestPlaceholders = [appLabel: "SkyNetEmu"]
         }
         release {
             buildConfigField 'String', 'COMPONENTS_BRANCH', '"main"'

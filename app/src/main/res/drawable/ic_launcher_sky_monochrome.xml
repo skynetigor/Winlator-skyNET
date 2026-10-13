@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon version of the SkyNetEmu glyph. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="19.2" android:translateY="20.5" android:scaleX="0.068" android:scaleY="0.068">
+        <group android:translateY="-20">
+            <path android:pathData="M310,270H714C795,270 840,330 872,480C900,610 906,720 852,745C800,768 758,722 718,664C698,636 678,626 648,626H376C346,626 326,636 306,664C266,722 224,768 172,745C118,720 124,610 152,480C184,330 229,270 310,270Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="24" android:strokeLineJoin="round" />
+            <path android:pathData="M262,420V500M222,460H302" android:strokeColor="#FFFFFFFF" android:strokeWidth="26" android:strokeLineCap="round" />
+            <path android:pathData="M799,400A19,19 0 1 1 761,400A19,19 0 1 1 799,400ZM844,448A19,19 0 1 1 806,448A19,19 0 1 1 844,448ZM754,448A19,19 0 1 1 716,448A19,19 0 1 1 754,448ZM799,496A19,19 0 1 1 761,496A19,19 0 1 1 799,496Z" android:fillColor="#FFFFFFFF" />
+            <path android:pathData="M440,626V690M512,626V690M584,626V690" android:strokeColor="#FFFFFFFF" android:strokeWidth="20" android:strokeLineCap="round" />
+            <path android:pathData="M454,702A14,14 0 1 1 426,702A14,14 0 1 1 454,702ZM526,702A14,14 0 1 1 498,702A14,14 0 1 1 526,702ZM598,702A14,14 0 1 1 570,702A14,14 0 1 1 598,702Z" android:fillColor="#FFFFFFFF" />
+            <group android:translateX="175" android:translateY="105" android:scaleX="0.66" android:scaleY="0.66">
+                <path android:pathData="M660,395C640,300 370,320 370,450C370,570 650,470 650,600C650,725 380,720 360,610" android:strokeColor="#FFFFFFFF" android:strokeWidth="64" android:strokeLineCap="round" />
+            </group>
+        </group>
+    </group>
+</vector>

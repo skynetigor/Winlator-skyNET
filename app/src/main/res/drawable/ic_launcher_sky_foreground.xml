@@ -1,12 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Winlator's 4-pane window glyph linked to a small node graph (skyNET). Kept inside the
-     66dp safe circle of the 108dp adaptive-icon canvas. -->
+<!-- SkyNetEmu: an S on a gamepad. The art is the 1024 icon design, scaled into the 66dp safe circle of the 108dp canvas. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M60,55L70,45 M70,45L80,55 M80,55L70,65 M70,65L60,55 M70,45L70,65" android:strokeColor="#FFFFFFFF" android:strokeAlpha="0.9"
-        android:strokeWidth="1.6" android:strokeLineCap="round" />
-    <path android:pathData="M67,45a3,3 0 1,0 6,0a3,3 0 1,0 -6,0Z M77,55a3,3 0 1,0 6,0a3,3 0 1,0 -6,0Z M67,65a3,3 0 1,0 6,0a3,3 0 1,0 -6,0Z M57,55a3,3 0 1,0 6,0a3,3 0 1,0 -6,0Z" android:fillColor="#FFFFFFFF" />
-    <path android:pathData="M37,39H53A7,7 0 0 1 60,46V62A7,7 0 0 1 53,69H37A7,7 0 0 1 30,62V46A7,7 0 0 1 37,39Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.6" />
-    <path android:pathData="M36.7,43.5H41.5A2.2,2.2 0 0 1 43.7,45.7V50.5A2.2,2.2 0 0 1 41.5,52.7H36.7A2.2,2.2 0 0 1 34.5,50.5V45.7A2.2,2.2 0 0 1 36.7,43.5Z M48.5,43.5H53.3A2.2,2.2 0 0 1 55.5,45.7V50.5A2.2,2.2 0 0 1 53.3,52.7H48.5A2.2,2.2 0 0 1 46.3,50.5V45.7A2.2,2.2 0 0 1 48.5,43.5Z M36.7,55.3H41.5A2.2,2.2 0 0 1 43.7,57.5V62.3A2.2,2.2 0 0 1 41.5,64.5H36.7A2.2,2.2 0 0 1 34.5,62.3V57.5A2.2,2.2 0 0 1 36.7,55.3Z M48.5,55.3H53.3A2.2,2.2 0 0 1 55.5,57.5V62.3A2.2,2.2 0 0 1 53.3,64.5H48.5A2.2,2.2 0 0 1 46.3,62.3V57.5A2.2,2.2 0 0 1 48.5,55.3Z" android:fillColor="#FFFFFFFF" />
+    <group android:translateX="19.2" android:translateY="20.5" android:scaleX="0.068" android:scaleY="0.068">
+        <group android:translateY="-20">
+            <path android:pathData="M310,270H714C795,270 840,330 872,480C900,610 906,720 852,745C800,768 758,722 718,664C698,636 678,626 648,626H376C346,626 326,636 306,664C266,722 224,768 172,745C118,720 124,610 152,480C184,330 229,270 310,270Z" android:strokeWidth="24" android:strokeLineJoin="round">
+                <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="118" android:startY="250" android:endX="906" android:endY="750"><item android:offset="0" android:color="#FF5EE7FF" /><item android:offset="1" android:color="#FFB07CFF" /></gradient></aapt:attr>
+            </path>
+            <path android:pathData="M262,420V500M222,460H302" android:strokeWidth="26" android:strokeLineCap="round">
+                <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="118" android:startY="250" android:endX="906" android:endY="750"><item android:offset="0" android:color="#FF5EE7FF" /><item android:offset="1" android:color="#FFB07CFF" /></gradient></aapt:attr>
+            </path>
+            <path android:pathData="M799,400A19,19 0 1 1 761,400A19,19 0 1 1 799,400ZM844,448A19,19 0 1 1 806,448A19,19 0 1 1 844,448ZM754,448A19,19 0 1 1 716,448A19,19 0 1 1 754,448ZM799,496A19,19 0 1 1 761,496A19,19 0 1 1 799,496Z" android:fillColor="#FF8FB4FF" />
+            <path android:pathData="M440,626V690M512,626V690M584,626V690" android:strokeWidth="20" android:strokeLineCap="round">
+                <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="118" android:startY="250" android:endX="906" android:endY="750"><item android:offset="0" android:color="#FF5EE7FF" /><item android:offset="1" android:color="#FFB07CFF" /></gradient></aapt:attr>
+            </path>
+            <path android:pathData="M454,702A14,14 0 1 1 426,702A14,14 0 1 1 454,702ZM526,702A14,14 0 1 1 498,702A14,14 0 1 1 526,702ZM598,702A14,14 0 1 1 570,702A14,14 0 1 1 598,702Z" android:fillColor="#FFFFFFFF" />
+            <group android:translateX="175" android:translateY="105" android:scaleX="0.66" android:scaleY="0.66">
+                <path android:pathData="M660,395C640,300 370,320 370,450C370,570 650,470 650,600C650,725 380,720 360,610" android:strokeWidth="64" android:strokeLineCap="round">
+                    <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="360" android:startY="0" android:endX="660" android:endY="0"><item android:offset="0" android:color="#FF5EE7FF" /><item android:offset="1" android:color="#FFB07CFF" /></gradient></aapt:attr>
+                </path>
+                <path android:pathData="M692,395A32,32 0 1 1 628,395A32,32 0 1 1 692,395ZM392,610A32,32 0 1 1 328,610A32,32 0 1 1 392,610Z" android:fillColor="#FFFFFFFF" />
+            </group>
+        </group>
+    </group>
 </vector>

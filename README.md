@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="logo.png" alt="Winlator skyNET" width="180">
+  <img src="branding/banner.png" alt="SkyNetEmu" width="100%">
 </p>
-
-<h1 align="center">Winlator skyNET</h1>
 
 <p align="center">
   A personal fork of Winlator focused on UX, performance and the features I think Winlator should just have.
@@ -12,7 +10,7 @@
 
 ## What this is
 
-**Winlator skyNET** is a fork of [**Winlator Ludashi**](https://github.com/StevenMXZ/Winlator-Ludashi) by StevenMXZ. Winlator lets you run Windows (x86/x86_64) games and apps on Android through Wine, with `x86_64` containers on Box86/Box64 and `Arm64EC` containers on FEXCore or WowBox64.
+**SkyNetEmu** is a fork of [**Winlator Ludashi**](https://github.com/StevenMXZ/Winlator-Ludashi) by StevenMXZ. Winlator lets you run Windows (x86/x86_64) games and apps on Android through Wine, with `x86_64` containers on Box86/Box64 and `Arm64EC` containers on FEXCore or WowBox64.
 
 I forked Ludashi because I genuinely like it — its UX is the nicest of the Winlator builds I've tried, and it's the base I want to build on. This fork keeps that foundation and adds the UX, performance and functionality changes I consider must-haves, borrowing ideas from the wider Winlator ecosystem where they make sense.
 
