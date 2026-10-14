@@ -16,6 +16,15 @@
 //
 // Environment (set by the app, see GuestProgramLauncherComponent):
 //   SKY_FSCACHE=1             turn the cache on
+//   SKY_FSCACHE_COPY=1        (with SKY_FSCACHE=1) open small read-only files of the roots from a copy kept in SKY_FSCACHE_DIR:
+//                             the first open copies the file (size up to SKY_FSCACHE_COPY_MAX bytes, default 4 MB), later opens, in
+//                             this and in later sessions, open the copy, which is on fast storage; the copy's name carries the
+//                             file's size and modification time, so a changed file is copied again
+//   SKY_FSCACHE_DIR=dir       where the copies go (internal storage)
+//   SKY_FSCACHE_PROBE=1       (with SKY_FSCACHE=1) answer Wine's "is this directory case sensitive" probe from memory: it opens the
+//                             directory, asks ioctl(FS_IOC_GETFLAGS) and fstatfs about it, looks for ".ciopfs" in it and closes it;
+//                             on shared storage that is four round trips each time. The directory is opened once and the probe
+//                             gets a duplicate of that descriptor; the two answers are remembered per directory.
 //   SKY_FSCACHE_STATS=1       count the metadata calls and their time, write a summary to the log directory
 //   SKY_FSCACHE_ROOTS=a:b     absolute directories to cache (the game folder)
 //   SKY_FSCACHE_SHM=file      shared change counters (created by the app; without it only this process's changes are seen)
@@ -37,6 +46,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <sys/types.h>
 #include <sys/xattr.h>
 #include <time.h>
@@ -49,10 +59,10 @@
 // ---------------------------------------------------------------------------------------------------------------------
 
 enum { FN_STAT, FN_LSTAT, FN_FSTATAT, FN_STATX, FN_GETXATTR, FN_LGETXATTR, FN_OPENDIR, FN_FDOPENDIR, FN_READDIR, FN_CLOSEDIR,
-       FN_ACCESS, FN_FACCESSAT, FN_OPEN, FN_READ, FN_COUNT };
+       FN_ACCESS, FN_FACCESSAT, FN_OPEN, FN_READ, FN_IOCTL, FN_FSTATFS, FN_COUNT };
 static const char *const FN_NAMES[FN_COUNT] = {
     "stat", "lstat", "fstatat", "statx", "getxattr", "lgetxattr", "opendir", "fdopendir", "readdir", "closedir", "access",
-    "faccessat", "open", "read"
+    "faccessat", "open", "read", "ioctl", "fstatfs"
 };
 enum { CLS_ROOT, CLS_OTHER, CLS_UNKNOWN, CLS_COUNT };
 static const char *const CLS_NAMES[CLS_COUNT] = { "root", "other", "unknown" };
@@ -70,6 +80,53 @@ static int g_stats;     // SKY_FSCACHE_STATS
 static int g_cache;     // SKY_FSCACHE
 static int g_enabled;   // either
 static char g_log_dir[512];
+static int g_copy;                      // SKY_FSCACHE_COPY
+static int g_probe;                     // SKY_FSCACHE_PROBE
+static char g_copy_dir[512];
+static off_t g_copy_max = 4 << 20;
+static uint64_t g_copy_cap = 6144ull << 20;   // stop copying (but keep using the copies) when this much was added by this process
+static _Atomic uint64_t g_copy_added, g_copy_hits, g_copy_made, g_copy_skipped;
+#define FDTAB_SIZE 8192
+// ---- directory probe pool (SKY_FSCACHE_PROBE) ----
+#define POOL_MAX 2048
+#define FS_IOC_GETFLAGS_REQ 0x80086601u
+typedef struct {
+    uint64_t h;
+    char *path;
+    int fd;                 // the one real descriptor of the directory, kept open
+    int dead;               // the directory was changed: do not hand it out any more
+    int ioctl_done, ioctl_ret, ioctl_errno;
+    long ioctl_val;
+    int statfs_done, statfs_ret, statfs_errno;
+    uint64_t statfs_t;
+    struct statfs sfs;
+} pool_t;
+static pool_t g_pool[POOL_MAX];
+static int g_pool_n;
+static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic int g_fdprobe[FDTAB_SIZE];   // descriptor -> pool index + 1 (it is a duplicate of the pooled one), 0 = no
+static _Atomic uint64_t g_probe_opens, g_probe_ioctls, g_probe_statfs;
+
+static void probe_invalidate(uint64_t h);
+
+// Statistics: which flags the opens under a root use (value, count, how many of them were directories).
+#define FLAGHIST 16
+static _Atomic uint32_t g_flag_val[FLAGHIST];
+static _Atomic uint64_t g_flag_cnt[FLAGHIST];
+static void flag_note(uint32_t v) {
+    for (int i = 0; i < FLAGHIST; i++) {
+        uint32_t cur = atomic_load(&g_flag_val[i]);
+        if (cur == v + 1 || cur == 0) {
+            if (cur == 0) {
+                uint32_t expected = 0;
+                if (!atomic_compare_exchange_strong(&g_flag_val[i], &expected, v + 1) && expected != v + 1) continue;
+            }
+            atomic_fetch_add(&g_flag_cnt[i], 1);
+            return;
+        }
+    }
+}
+
 static uint64_t g_start_ns;
 static _Atomic uint64_t g_last_dump_ns;
 static __thread int g_depth;   // >0 while inside a real libc call made by a wrapper: nested interposed calls pass through
@@ -503,6 +560,19 @@ static void dump(const char *why) {
                   (unsigned long long)atomic_load(&g_cache_hits), (unsigned long long)atomic_load(&g_cache_misses),
                   (unsigned long long)atomic_load(&g_cache_stores), (double)atomic_load(&g_mem) / 1048576.0,
                   g_shm ? "yes" : "no");
+    for (int i = 0; i < FLAGHIST; i++) {
+        uint32_t v = atomic_load(&g_flag_val[i]);
+        if (v) n += snprintf(buf + n, sizeof buf - n, "open-flags root: 0x%x x%llu\n", v - 1,
+                             (unsigned long long)atomic_load(&g_flag_cnt[i]));
+    }
+    if (g_probe)
+        n += snprintf(buf + n, sizeof buf - n, "probe: dir-opens=%llu ioctls=%llu fstatfs=%llu dirs=%d\n",
+                      (unsigned long long)atomic_load(&g_probe_opens), (unsigned long long)atomic_load(&g_probe_ioctls),
+                      (unsigned long long)atomic_load(&g_probe_statfs), g_pool_n);
+    if (g_copy)
+        n += snprintf(buf + n, sizeof buf - n, "copy: opened-from-copy=%llu copies-made=%llu added=%.1fMB skipped=%llu\n",
+                      (unsigned long long)atomic_load(&g_copy_hits), (unsigned long long)atomic_load(&g_copy_made),
+                      (double)atomic_load(&g_copy_added) / 1048576.0, (unsigned long long)atomic_load(&g_copy_skipped));
     n += snprintf(buf + n, sizeof buf - n, "%-10s %-8s %10s %10s %9s %9s %10s %9s\n", "function", "class", "calls", "total_ms",
                   "avg_us", "failed", "cache_hits", "MB");
     for (int f = 0; f < FN_COUNT; f++) {
@@ -592,7 +662,6 @@ static void record(int fn, int cls, uint64_t t0, uint64_t t1, int failed, const 
 }
 
 // Which open descriptors belong to a root (statistics only): read time is attributed through this.
-#define FDTAB_SIZE 8192
 static _Atomic uint8_t g_fdcls[FDTAB_SIZE];   // 0 unknown, 1 root, 2 other
 
 static void count_hit(int fn, int cls) {
@@ -687,6 +756,18 @@ __attribute__((constructor)) static void fscache_init(void) {
     const char *dir = getenv("SKY_FSCACHE_LOG_DIR");
     if (dir) { strncpy(g_log_dir, dir, sizeof g_log_dir - 1); g_log_dir[sizeof g_log_dir - 1] = 0; }
     read_dosdevices();
+    const char *pr = getenv("SKY_FSCACHE_PROBE");
+    g_probe = g_cache && pr && pr[0] == '1';
+    const char *cp = getenv("SKY_FSCACHE_COPY");
+    const char *cdir = getenv("SKY_FSCACHE_DIR");
+    if (g_cache && cp && cp[0] == '1' && cdir && strlen(cdir) < sizeof g_copy_dir - 64) {
+        strcpy(g_copy_dir, cdir);
+        g_copy = 1;
+        const char *mx = getenv("SKY_FSCACHE_COPY_MAX");
+        if (mx && atoll(mx) > 0) g_copy_max = (off_t)atoll(mx);
+        const char *cap = getenv("SKY_FSCACHE_COPY_CAP_MB");
+        if (cap && atoll(cap) > 0) g_copy_cap = (uint64_t)atoll(cap) << 20;
+    }
     const char *shm_path = getenv("SKY_FSCACHE_SHM");
     if (g_cache && shm_path) {
         g_depth++;
@@ -870,6 +951,23 @@ static DIR *open_dir_common(int fn, int fd, const char *path) {
         }
         atomic_fetch_add(&g_cache_misses, 1);
     }
+    if (!path && g_probe && fd >= 0 && fd < FDTAB_SIZE) {
+        int pi = atomic_load(&g_fdprobe[fd]);
+        if (pi) {
+            char dirpath[1100];
+            pthread_mutex_lock(&g_pool_lock);
+            snprintf(dirpath, sizeof dirpath, "%s", g_pool[pi - 1].path);
+            pthread_mutex_unlock(&g_pool_lock);
+            LOAD(real_open, "open");
+            g_depth++;
+            int nfd = real_open ? real_open(dirpath, O_RDONLY | O_CLOEXEC | O_DIRECTORY) : -1;
+            g_depth--;
+            if (nfd >= 0) {
+                close(fd);   // the duplicate: nothing is released on the file system, the pooled descriptor stays
+                fd = nfd;
+            }
+        }
+    }
     g_depth++;
     uint64_t t0 = now_ns();
     DIR *d = path ? real_opendir(path) : real_fdopendir(fd);
@@ -1052,6 +1150,7 @@ static void note_change(int dirfd, const char *path, int write_open) {
     const char *full = resolve(dirfd, path, rbuf, sizeof rbuf);
     if (!full || canonicalize(full, cbuf, sizeof cbuf) != 0 || !in_root(cbuf)) return;
     uint64_t h = hash_str(cbuf);
+    if (g_probe) probe_invalidate(h);
     if (write_open) dirty_add(h);
     gen_bump(parent_hash(cbuf));
     gen_bump(h);
@@ -1059,18 +1158,234 @@ static void note_change(int dirfd, const char *path, int write_open) {
 
 #define WRITE_INTENT (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)
 
+static int (*real_ioctl)(int, int, ...);
+static int (*real_fstatfs)(int, struct statfs *);
+
+// A descriptor for the directory that the probe can use: a duplicate of the one kept open per directory.
+static int probe_open(const char *canon, int flags) {
+    LOAD(real_open, "open");
+    LOAD(real_fstatat, "fstatat");
+    if (!real_open || !real_fstatat) return -1;
+    uint64_t h = hash_str(canon);
+    struct stat st;
+    int err = 0;
+    if (!cache_get_stat(0, canon, h ^ 0, &st, &err)) {
+        if (real_fstatat(AT_FDCWD, canon, &st, 0) != 0) return -1;
+    } else if (err) {
+        return -1;
+    }
+    if (!S_ISDIR(st.st_mode)) return -1;
+    int idx = -1, pfd = -1;
+    pthread_mutex_lock(&g_pool_lock);
+    for (int i = 0; i < g_pool_n; i++)
+        if (g_pool[i].h == h && !g_pool[i].dead && strcmp(g_pool[i].path, canon) == 0) { idx = i; break; }
+    if (idx < 0 && g_pool_n < POOL_MAX) {
+        int fd = real_open(canon, O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+        char *copy = fd >= 0 ? strdup(canon) : NULL;
+        if (fd >= 0 && copy) {
+            idx = g_pool_n++;
+            memset(&g_pool[idx], 0, sizeof g_pool[idx]);
+            g_pool[idx].h = h;
+            g_pool[idx].path = copy;
+            g_pool[idx].fd = fd;
+        } else if (fd >= 0) {
+            close(fd);
+        }
+    }
+    if (idx >= 0) pfd = g_pool[idx].fd;
+    pthread_mutex_unlock(&g_pool_lock);
+    if (pfd < 0) return -1;
+    int nfd = fcntl(pfd, (flags & O_CLOEXEC) ? F_DUPFD_CLOEXEC : F_DUPFD, 3);
+    if (nfd < 0) return -1;
+    if (nfd < FDTAB_SIZE) atomic_store(&g_fdprobe[nfd], idx + 1);
+    atomic_fetch_add(&g_probe_opens, 1);
+    return nfd;
+}
+
+static void probe_invalidate(uint64_t h) {
+    pthread_mutex_lock(&g_pool_lock);
+    for (int i = 0; i < g_pool_n; i++) if (g_pool[i].h == h) g_pool[i].dead = 1;
+    pthread_mutex_unlock(&g_pool_lock);
+}
+
+static int probe_ioctl(int idx, int fd, int req, void *arg) {
+    pthread_mutex_lock(&g_pool_lock);
+    pool_t *p = &g_pool[idx];
+    if (p->ioctl_done) {
+        int ret = p->ioctl_ret, er = p->ioctl_errno, v = (int)p->ioctl_val;
+        pthread_mutex_unlock(&g_pool_lock);
+        if (ret == 0 && arg) *(int *)arg = v;
+        errno = er;
+        atomic_fetch_add(&g_probe_ioctls, 1);
+        return ret;
+    }
+    pthread_mutex_unlock(&g_pool_lock);
+    g_depth++;
+    int v = 0;
+    int ret = real_ioctl(fd, req, &v);
+    int er = errno;
+    g_depth--;
+    pthread_mutex_lock(&g_pool_lock);
+    if (!p->ioctl_done) {
+        p->ioctl_done = 1;
+        p->ioctl_ret = ret;
+        p->ioctl_errno = ret ? er : 0;
+        p->ioctl_val = v;
+    }
+    pthread_mutex_unlock(&g_pool_lock);
+    if (ret == 0 && arg) *(int *)arg = v;
+    errno = er;
+    return ret;
+}
+
+#define PROBE_STATFS_TTL_NS (10ull * 1000000000ull)
+static int probe_fstatfs(int idx, int fd, struct statfs *buf) {
+    uint64_t now = now_ns();
+    pthread_mutex_lock(&g_pool_lock);
+    pool_t *p = &g_pool[idx];
+    if (p->statfs_done && now - p->statfs_t < PROBE_STATFS_TTL_NS) {
+        int ret = p->statfs_ret, er = p->statfs_errno;
+        if (ret == 0) *buf = p->sfs;
+        pthread_mutex_unlock(&g_pool_lock);
+        errno = er;
+        atomic_fetch_add(&g_probe_statfs, 1);
+        return ret;
+    }
+    pthread_mutex_unlock(&g_pool_lock);
+    g_depth++;
+    struct statfs sfs;
+    int ret = real_fstatfs(fd, &sfs);
+    int er = errno;
+    g_depth--;
+    pthread_mutex_lock(&g_pool_lock);
+    p->statfs_done = 1;
+    p->statfs_ret = ret;
+    p->statfs_errno = ret ? er : 0;
+    p->statfs_t = now_ns();
+    if (ret == 0) { p->sfs = sfs; *buf = sfs; }
+    pthread_mutex_unlock(&g_pool_lock);
+    errno = er;
+    return ret;
+}
+
+// Copy of a small read-only file on fast storage. The name says which version of the file it is (path hash, size, mtime), so
+// whatever is found under that name is current; a file that changes gets a new name.
+static int write_all(int fd, const char *buf, size_t n) {
+    while (n) {
+        ssize_t w = write(fd, buf, n);
+        if (w < 0) { if (errno == EINTR) continue; return -1; }
+        buf += w;
+        n -= (size_t)w;
+    }
+    return 0;
+}
+
+static void copy_name(char *out, size_t n, uint64_t h, const struct stat *st) {
+    snprintf(out, n, "%s/%016llx_%llx_%llx_%llx", g_copy_dir, (unsigned long long)h, (unsigned long long)st->st_size,
+             (unsigned long long)st->st_mtim.tv_sec, (unsigned long long)st->st_mtim.tv_nsec);
+}
+
+static int make_copy(const char *src_path, const char *dst, const struct stat *want) {
+    int src = real_open(src_path, O_RDONLY | O_CLOEXEC);
+    if (src < 0) return -1;
+    struct stat st;
+    if (fstat(src, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size != want->st_size ||
+        st.st_mtim.tv_sec != want->st_mtim.tv_sec || st.st_mtim.tv_nsec != want->st_mtim.tv_nsec) {
+        close(src);
+        return -1;   // the file changed since it was looked at: leave it to the next open
+    }
+    char tmp[700];
+    snprintf(tmp, sizeof tmp, "%s.tmp.%d.%d", dst, (int)getpid(), (int)gettid());
+    int fd = real_open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+    if (fd < 0) { close(src); return -1; }
+    static __thread char buf[256 * 1024];
+    int ok = 1;
+    for (;;) {
+        ssize_t r = read(src, buf, sizeof buf);
+        if (r < 0) { if (errno == EINTR) continue; ok = 0; break; }
+        if (r == 0) break;
+        if (write_all(fd, buf, (size_t)r) != 0) { ok = 0; break; }
+    }
+    if (ok) {
+        struct timespec ts[2] = { st.st_atim, st.st_mtim };
+        futimens(fd, ts);
+    }
+    close(fd);
+    close(src);
+    if (!ok || rename(tmp, dst) != 0) { unlink(tmp); return -1; }
+    atomic_fetch_add(&g_copy_made, 1);
+    atomic_fetch_add(&g_copy_added, (uint64_t)st.st_size);
+    return 0;
+}
+
+// Returns a descriptor for the copy of `canon`, or -1 to open the file itself.
+static int open_from_copy(const char *canon, int flags) {
+    LOAD(real_open, "open");
+    LOAD(real_fstatat, "fstatat");
+    if (!real_open || !real_fstatat) return -1;
+    uint64_t h = hash_str(canon);
+    if (dirty_has(h)) return -1;
+    struct stat st;
+    int err = 0;
+    if (!cache_get_stat(0, canon, h ^ 0, &st, &err)) {
+        if (real_fstatat(AT_FDCWD, canon, &st, 0) != 0) return -1;
+    } else if (err) {
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode) || st.st_size <= 0 || st.st_size > g_copy_max) return -1;
+    char name[700];
+    copy_name(name, sizeof name, h, &st);
+    int fd = real_open(name, flags, 0);
+    if (fd >= 0) {
+        atomic_fetch_add(&g_copy_hits, 1);
+        return fd;
+    }
+    if (errno != ENOENT) return -1;
+    if (atomic_load(&g_copy_added) > g_copy_cap) {
+        atomic_fetch_add(&g_copy_skipped, 1);
+        return -1;
+    }
+    if (make_copy(canon, name, &st) != 0) return -1;
+    fd = real_open(name, flags, 0);
+    if (fd >= 0) atomic_fetch_add(&g_copy_hits, 1);
+    return fd;
+}
+
 static int open_common(int dirfd, const char *path, int flags, mode_t mode, int is_at) {
     int track = g_cache && !g_depth && (flags & WRITE_INTENT);
     if (track) note_change(dirfd, path, 1);
     int cls = CLS_UNKNOWN;
-    if (g_stats && !g_depth && path) {
+    int r = -1;
+    int redirected = 0;
+    uint64_t t0 = 0;
+    if ((g_stats || g_copy || g_probe) && !g_depth && path) {
         char rbuf[1100], cbuf[1100];
         const char *full = resolve(is_at ? dirfd : AT_FDCWD, path, rbuf, sizeof rbuf);
         const char *canon = (full && canonicalize(full, cbuf, sizeof cbuf) == 0) ? cbuf : NULL;
         cls = class_of(canon);
+        t0 = now_ns();
+        if (g_stats && cls == CLS_ROOT) flag_note((uint32_t)flags);
+        if (g_probe && cls == CLS_ROOT && (flags & (O_ACCMODE | O_CREAT | O_TRUNC | O_PATH | O_TMPFILE)) == O_RDONLY) {
+            g_depth++;
+            r = probe_open(canon, flags);
+            int saved = errno;
+            g_depth--;
+            if (r >= 0) redirected = 1;
+            else errno = saved;
+        }
+        if (!redirected && g_copy && cls == CLS_ROOT && (flags & (O_ACCMODE | O_CREAT | O_TRUNC | O_DIRECTORY | O_PATH | O_TMPFILE)) == O_RDONLY) {
+            g_depth++;
+            r = open_from_copy(canon, flags);
+            int saved = errno;
+            g_depth--;
+            if (r >= 0) redirected = 1;
+            else errno = saved;
+        }
     }
-    uint64_t t0 = g_stats ? now_ns() : 0;
-    int r = is_at ? real_openat(dirfd, path, flags, mode) : real_open(path, flags, mode);
+    if (!redirected) {
+        if (g_stats && !t0) t0 = now_ns();
+        r = is_at ? real_openat(dirfd, path, flags, mode) : real_open(path, flags, mode);
+    }
     int e = errno;
     if (g_stats && !g_depth) {
         record(FN_OPEN, cls, t0, now_ns(), r < 0, NULL);
@@ -1107,7 +1422,10 @@ EXPORT int openat(int dirfd, const char *path, int flags, ...) {
 
 EXPORT int close(int fd) {
     LOAD(real_close, "close");
-    if (g_stats && fd >= 0 && fd < FDTAB_SIZE) atomic_store(&g_fdcls[fd], 0);
+    if ((g_stats || g_probe) && fd >= 0 && fd < FDTAB_SIZE) {
+        atomic_store(&g_fdcls[fd], 0);
+        atomic_store(&g_fdprobe[fd], 0);
+    }
     return real_close(fd);
 }
 
@@ -1134,6 +1452,42 @@ static void note_read(int fd, uint64_t t0, uint64_t t1, ssize_t r) {
     int cls = fd_class(fd);
     record(FN_READ, cls, t0, t1, r < 0, NULL);
     if (r > 0) atomic_fetch_add_explicit(&g_counters[FN_READ][cls].bytes, (uint64_t)r, memory_order_relaxed);
+}
+
+EXPORT int ioctl(int fd, int req, ...) {
+    LOAD(real_ioctl, "ioctl");
+    va_list ap;
+    va_start(ap, req);
+    void *arg = va_arg(ap, void *);
+    va_end(ap);
+    if (g_probe && !g_depth && (unsigned)req == FS_IOC_GETFLAGS_REQ && fd >= 0 && fd < FDTAB_SIZE) {
+        int pi = atomic_load(&g_fdprobe[fd]);
+        if (pi) return probe_ioctl(pi - 1, fd, req, arg);
+    }
+    if (!g_stats || g_depth) return real_ioctl(fd, req, arg);
+    int cls = fd_class(fd);
+    uint64_t t0 = now_ns();
+    int r = real_ioctl(fd, req, arg);
+    int e = errno;
+    record(FN_IOCTL, cls, t0, now_ns(), r < 0, NULL);
+    errno = e;
+    return r;
+}
+
+EXPORT int fstatfs(int fd, struct statfs *buf) {
+    LOAD(real_fstatfs, "fstatfs");
+    if (g_probe && !g_depth && fd >= 0 && fd < FDTAB_SIZE) {
+        int pi = atomic_load(&g_fdprobe[fd]);
+        if (pi) return probe_fstatfs(pi - 1, fd, buf);
+    }
+    if (!g_stats || g_depth) return real_fstatfs(fd, buf);
+    int cls = fd_class(fd);
+    uint64_t t0 = now_ns();
+    int r = real_fstatfs(fd, buf);
+    int e = errno;
+    record(FN_FSTATFS, cls, t0, now_ns(), r < 0, NULL);
+    errno = e;
+    return r;
 }
 
 EXPORT ssize_t read(int fd, void *buf, size_t n) {

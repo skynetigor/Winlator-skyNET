@@ -466,6 +466,17 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                         Log.e("GuestLauncher", "Cannot create " + shm + ": " + e.getMessage());
                     }
                 }
+                if (fsCache && "1".equals(this.envVars.get("SKY_FSCACHE_COPY"))) {
+                    // Copies of the game's small read-only files on internal storage (see fscache.c). Kept between sessions;
+                    // cleared when it has grown past the cap.
+                    File copyDir = new File(environment.getContext().getFilesDir(), "fscache");
+                    copyDir.mkdirs();
+                    long used = 0;
+                    File[] files = copyDir.listFiles();
+                    if (files != null) for (File f : files) used += f.length();
+                    if (used > 8L * 1024 * 1024 * 1024) FileUtils.clear(copyDir);
+                    execEnvVars.put("SKY_FSCACHE_DIR", copyDir.getAbsolutePath());
+                }
                 if (fsStats) {
                     File logDir = new File(android.os.Environment.getExternalStorageDirectory(), "Winlator/logs");
                     logDir.mkdirs();
