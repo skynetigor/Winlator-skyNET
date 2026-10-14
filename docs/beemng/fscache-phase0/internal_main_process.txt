@@ -1,0 +1,75 @@
+pid=17421 comm=BeamNG.drive.x6 uptime=106.1s reason=periodic roots=/data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games:/storage/emulated/0:/storage/emulated/0/Download
+function   class         calls   total_ms    avg_us    failed    unique
+stat       root          38048      105.9       2.8         2      5319
+stat       other         17936       51.8       2.9      2693         0
+lstat      root          32032       69.5       2.2         0      6266
+lstat      other          1008        4.0       4.0        11         0
+fstatat    other        577286     1753.8       3.0    193821         0
+getxattr   root          64064      170.3       2.7     64064      6266
+getxattr   other          1994       16.4       8.2      1994         0
+opendir    root           1673        4.0       2.4         0         0
+opendir    other           183        0.5       2.9       116         0
+fdopendir  root          47020       28.0       0.6         0         0
+fdopendir  other         82146       64.0       0.8         0         0
+readdir    root        1237252      307.0       0.2         0         0
+readdir    other        908500      295.8       0.3         0         0
+closedir   root          48693       23.7       0.5         0         0
+closedir   other         82213       46.6       0.6         0         0
+access     root              1        0.0       2.5         1         1
+access     other           192        0.2       1.2        35         0
+
+top stat-like paths by calls:
+    calls     ms  class path
+    40986   95.5  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local
+    40962  103.7  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34
+    40960   89.3  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser
+    40956   90.2  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users
+    40956   93.9  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData
+    40954  102.4  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive
+    23519   57.6  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home
+    23518   59.5  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot
+    23517   58.7  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games
+     9372   34.3  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/gameplay?
+     9372   29.4  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/gameplay
+     7962   26.1  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/vehicles?
+     7962   22.8  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/vehicles
+     7764   14.0  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/levels?
+     7764   12.4  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/levels
+     5016   15.5  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/shaders
+     5016   18.2  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/c:/users/xuser/AppData/Local/BeamNG.drive/0.34/shaders?
+     4406    7.9  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot/levels
+     4406    8.8  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot/levels?
+     4140   12.7  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot/gameplay
+     4017   14.8  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot/shaders
+     4015   16.7  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser/.wine/dosdevices/z:/home/games/BeemNG_0_34_Steam_Depot/shaders/common
+     3986    9.8  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot
+     3980    8.4  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home
+     3974    9.0  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games
+
+top directories by readdir time:
+  opens  entries     ms  class path
+  72994   802926   268.6  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/users/xuser/AppData/Local/BeamNG.drive/0.34
+  20100   743700   151.6  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot
+   2005   152308    44.2  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/shaders/common
+   4204    84080    14.1  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/settings
+   3216    32160     9.8  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/shaders/common/material/shadergen
+    240    26400     8.9  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/settings/inputmaps
+   3339    33390     8.6  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/users/xuser/AppData/Local/BeamNG.drive/0.34/temp
+     48    36791     7.6  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/windows/system32
+   2148    12888     6.3  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/shaders/common/material/shadergen/v0
+   4178    20890     5.0  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/users/xuser/AppData/Local/BeamNG.drive/0.34/settings/cloud
+    114     7591     3.7  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/Bin64
+   1484    10388     3.5  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/common/extensions
+    242     9196     3.1  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/vehicle/extensions
+    472     8968     2.6  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/ge/extensions
+    796     6368     2.5  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/users/xuser/AppData/Local/BeamNG.drive/0.34/settings
+    300    12600     2.3  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/common
+    819     7371     2.1  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua
+    516     7740     2.1  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/ge
+      5       65     1.9  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/ui
+     92     4048     1.5  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/vehicle
+    312     7176     1.5  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/lua/common/libs
+      8      144     1.5  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/locales
+    388     3104     1.3  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/gameplay/missionTypes/garageToGarage
+    157     1365     1.1  other /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/xuser-2/.wine/drive_c/windows
+    388     2716     1.1  root  /data/user/0/com.winlator.cmod.dev2/files/imagefs/home/games/BeemNG_0_34_Steam_Depot/gameplay/missionTypes/arrive

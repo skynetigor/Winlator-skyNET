@@ -63,6 +63,17 @@ target_link_libraries(fakeinput
         dl
 )
 
+# Metadata shim for Wine processes (LD_PRELOAD): counts and, later, caches stat/readdir/getxattr on slow storage.
+add_library(fscache SHARED
+        winlator/fscache.c
+)
+
+target_compile_options(fscache PRIVATE -Wall -Wextra -fvisibility=hidden)
+
+target_link_libraries(fscache
+        dl
+)
+
 # Keep the Pypetto DisplayX/EGL target above untouched.  The optional Vulkan
 # renderer is a separate JNI library so selecting it cannot change the native
 # presentation path used by DisplayX or EGL.
